@@ -400,6 +400,7 @@ const Store = {
       const old = list.find(m => m.id === map.id);
       const entry = { id: map.id, title: map.title, updatedAt: map.updatedAt, count: countNodes(map.root), thumb: thumb ?? old?.thumb ?? null };
       localStorage.setItem('sodo.index', JSON.stringify([entry, ...list.filter(m => m.id !== map.id)]));
+      if (typeof Drive !== 'undefined' && !Drive.busy) Drive.scheduleSync();
       return true;
     } catch (err) {
       console.error(err);
@@ -857,7 +858,9 @@ function changed() { reindex(); render(); scheduleSave(); }
 
 /* ----- Lưu tự động ----- */
 let saveTimer, thumbTimer;
-function scheduleSave() {
+/** content=false: chỉ lưu vị trí xem (kéo/zoom), không tính là đã sửa sơ đồ. */
+function scheduleSave(content = true) {
+  if (content) S.dirty = true;
   $('#save-state').textContent = 'Đang lưu…';
   clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 450);
   clearTimeout(thumbTimer); thumbTimer = setTimeout(() => saveNow(true), 2500);
@@ -867,7 +870,8 @@ function saveNow(withThumb = false) {
   clearTimeout(saveTimer);
   if (S.temp) { clearTimeout(thumbTimer); $('#save-state').textContent = 'Bản chia sẻ · chưa lưu'; return; }
   if (withThumb) clearTimeout(thumbTimer);
-  S.map.updatedAt = Date.now(); S.map.view = { ...S.view };
+  if (S.dirty) { S.map.updatedAt = Date.now(); S.dirty = false; }
+  S.map.view = { ...S.view };
   let thumb;
   if (withThumb) { try { thumb = makeThumb(S.map); } catch (e) { console.warn(e); } }
   if (Store.save(S.map, thumb)) $('#save-state').textContent = 'Đã lưu';
@@ -1317,7 +1321,7 @@ function onUp() {
   if (!g) return;
   if (g.type === 'pan' && !g.moved) {
     if (S.sel || S.selRel) { S.sel = null; S.selRel = null; S.panelTab = 'map'; render(); }
-  } else if (g.type === 'pan') scheduleSave();
+  } else if (g.type === 'pan') scheduleSave(false);
   if (g.type === 'node' && g.started) {
     g.ghost.remove(); showDrop(null);
     if (g.drop) moveNode(g.id, g.drop.id, g.drop.pos, g.drop.side);
@@ -1360,7 +1364,7 @@ canvas.addEventListener('wheel', e => {
   e.preventDefault();
   if (e.ctrlKey || e.metaKey) zoomAt(S.view.k * Math.exp(-e.deltaY * 0.0085), e.clientX, e.clientY);
   else { S.view.x -= e.deltaX; S.view.y -= e.deltaY; applyView(); }
-  clearTimeout(canvas._wt); canvas._wt = setTimeout(scheduleSave, 600);
+  clearTimeout(canvas._wt); canvas._wt = setTimeout(() => scheduleSave(false), 600);
 }, { passive: false });
 window.addEventListener('resize', () => { if (S.presenting) showSlide(); });
 
@@ -1835,9 +1839,12 @@ async function openFile(meta, { save = false } = {}) {
   const win = !save && VIEWABLE.test(meta.type) ? window.open('', '_blank') : null;
   let rec;
   try { rec = await FileStore.get(meta.id); } catch (err) { console.error(err); }
+  if (!rec) { try { rec = await Drive.fetchFile(meta); } catch (err) { console.warn(err); } }
   if (!rec) {
     win?.close();
-    toast('Tệp này không có trong trình duyệt này (sơ đồ được mở từ máy khác hoặc từ link chia sẻ). Hãy nhập tệp .json có kèm tệp.', 5000);
+    toast(Drive.connected() && !Drive.hasToken()
+      ? 'Tệp này chưa có trên máy này. Bấm nút Google Drive để đăng nhập rồi mở lại.'
+      : 'Tệp này không có trong trình duyệt này (sơ đồ được mở từ máy khác hoặc từ link chia sẻ). Hãy nhập tệp .json có kèm tệp.', 5000);
     return;
   }
   if (win) { win.location.href = URL.createObjectURL(rec.blob); return; }
@@ -1909,6 +1916,262 @@ async function importAttachments(att) {
     try { const blob = await (await fetch(a.data)).blob(); await FileStore.put(id, { blob, name: a.name, type: a.type }); }
     catch (err) { console.warn('Không nhập được tệp', a?.name, err); }
   }
+}
+
+/* =====================================================================
+   ĐỒNG BỘ GOOGLE DRIVE — lưu sơ đồ và tệp đính kèm vào thư mục “Sodo” trong
+   Drive của người dùng (quyền drive.file: app chỉ thấy tệp do chính nó tạo).
+   Mỗi sơ đồ là một tệp .sodo.json; ai sửa sau thì thắng, nếu cả hai máy cùng
+   sửa từ lần đồng bộ trước thì giữ cả hai bản.
+   ===================================================================== */
+const GDRIVE_CLIENT_ID = '';
+const Drive = {
+  api: 'https://www.googleapis.com/drive/v3',
+  upload: 'https://www.googleapis.com/upload/drive/v3',
+  token: null, tokenExp: 0, busy: false, timer: null, status: '',
+  clientId() { try { return localStorage.getItem('sodo.gclient') || GDRIVE_CLIENT_ID; } catch { return GDRIVE_CLIENT_ID; } },
+  state() { try { return JSON.parse(localStorage.getItem('sodo.drive') || 'null'); } catch { return null; } },
+  setState(st) { try { st ? localStorage.setItem('sodo.drive', JSON.stringify(st)) : localStorage.removeItem('sodo.drive'); } catch {} },
+  connected() { return !!this.state(); },
+  hasToken() { return this.token && Date.now() < this.tokenExp - 60000; },
+
+  /** Xin quyền (mở cửa sổ đăng nhập Google). Phải gọi từ một cú bấm của người dùng. */
+  async login() {
+    await loadScript('https://accounts.google.com/gsi/client');
+    const st = this.state();
+    const resp = await new Promise((res, rej) => {
+      const tc = google.accounts.oauth2.initTokenClient({
+        client_id: this.clientId(),
+        scope: 'https://www.googleapis.com/auth/drive.file email',
+        callback: r => (r.error ? rej(new Error(r.error_description || r.error)) : res(r)),
+        error_callback: e => rej(new Error(e.type === 'popup_closed' ? 'Bạn đã đóng cửa sổ đăng nhập.' : e.type === 'popup_failed_to_open' ? 'Trình duyệt chặn cửa sổ đăng nhập — hãy cho phép popup.' : (e.message || e.type))),
+      });
+      tc.requestAccessToken({ prompt: st ? '' : 'consent', login_hint: st?.email || '' });
+    });
+    if (!google.accounts.oauth2.hasGrantedAllScopes(resp, 'https://www.googleapis.com/auth/drive.file')) {
+      throw new Error('Cần cho phép Sodo “xem, tạo và xóa tệp Google Drive do ứng dụng này tạo” thì mới đồng bộ được.');
+    }
+    this.token = resp.access_token; this.tokenExp = Date.now() + (+resp.expires_in || 3600) * 1000;
+    if (!st) {
+      const me = await this.req('https://www.googleapis.com/oauth2/v3/userinfo');
+      this.setState({ email: me.email || '', maps: {}, files: {}, deleted: [], lastSync: 0 });
+    }
+  },
+  logout() {
+    if (this.token) { try { google.accounts.oauth2.revoke(this.token); } catch {} }
+    this.token = null; this.setState(null); updateDriveUI();
+  },
+  async req(url, opts = {}, raw = false) {
+    const res = await fetch(url, { ...opts, headers: { Authorization: `Bearer ${this.token}`, ...(opts.headers || {}) } })
+      .catch(() => { throw new Error('Không kết nối được Google Drive.'); });
+    if (res.status === 401) { this.token = null; throw Object.assign(new Error('Phiên đăng nhập Google đã hết hạn.'), { relogin: true }); }
+    if (!res.ok) {
+      let msg = res.statusText; try { msg = (await res.json()).error?.message || msg; } catch {}
+      if (res.status === 403 && /quota|storage/i.test(msg)) throw new Error('Google Drive đã đầy dung lượng.');
+      throw new Error(`Google Drive báo lỗi (${res.status}): ${msg}`);
+    }
+    return raw ? res : res.status === 204 ? null : res.json();
+  },
+  async list(q, fields = 'id,name,appProperties') {
+    const out = [];
+    let page = '';
+    do {
+      const r = await this.req(`${this.api}/files?q=${encodeURIComponent(q)}&spaces=drive&pageSize=1000&fields=nextPageToken,files(${fields})${page ? '&pageToken=' + page : ''}`);
+      out.push(...r.files); page = r.nextPageToken;
+    } while (page);
+    return out;
+  },
+  async folder(st, key, name, parent) {
+    const slot = key + 'Folder';
+    if (st[slot]) return st[slot];
+    const q = `mimeType='application/vnd.google-apps.folder' and trashed=false and appProperties has { key='sodo' and value='${key}' }` + (parent ? ` and '${parent}' in parents` : '');
+    const found = (await this.list(q, 'id'))[0];
+    st[slot] = found ? found.id : (await this.req(`${this.api}/files?fields=id`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', appProperties: { sodo: key }, ...(parent ? { parents: [parent] } : {}) }),
+    })).id;
+    return st[slot];
+  },
+  /** Tải lên (tạo mới hoặc ghi đè) một tệp kèm thông tin mô tả. */
+  async put(driveId, meta, blob) {
+    const b = 'sodo' + Math.random().toString(36).slice(2);
+    const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`, blob, `\r\n--${b}--`]);
+    const url = driveId ? `${this.upload}/files/${driveId}?uploadType=multipart&fields=id` : `${this.upload}/files?uploadType=multipart&fields=id`;
+    return (await this.req(url, { method: driveId ? 'PATCH' : 'POST', headers: { 'Content-Type': `multipart/related; boundary=${b}` }, body })).id;
+  },
+  async putLarge(meta, blob) {
+    const init = await this.req(`${this.upload}/files?uploadType=resumable&fields=id`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': blob.type || 'application/octet-stream' },
+      body: JSON.stringify(meta),
+    }, true);
+    const loc = init.headers.get('Location');
+    if (!loc) throw new Error('Google Drive không nhận tải lên.');
+    return (await this.req(loc, { method: 'PUT', body: blob })).id;
+  },
+  async download(driveId) { return (await this.req(`${this.api}/files/${driveId}?alt=media`, {}, true)).blob(); },
+  async trash(driveId) {
+    await this.req(`${this.api}/files/${driveId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+  },
+
+  scheduleSync(delay = 4000) {
+    if (!this.connected() || !this.hasToken()) { updateDriveUI(); return; }
+    clearTimeout(this.timer); this.timer = setTimeout(() => this.sync().catch(() => {}), delay);
+  },
+  /** Đồng bộ hai chiều toàn bộ sơ đồ. */
+  async sync({ manual = false } = {}) {
+    if (!this.connected()) return;
+    if (this.busy) { this.again = true; return; }
+    if (!this.hasToken()) { updateDriveUI(); if (manual) await this.login(); else return; }
+    this.busy = true; this.status = 'syncing'; updateDriveUI();
+    const st = this.state();
+    let changedHere = false;
+    try {
+      if (S.map && !S.temp && S.dirty) saveNow();
+      const root = await this.folder(st, 'root', 'Sodo');
+      await this.folder(st, 'files', 'Tệp đính kèm', root);
+      const remote = new Map();
+      for (const f of await this.list(`'${root}' in parents and trashed=false and appProperties has { key='kind' and value='map' }`)) {
+        remote.set(f.appProperties.sodoId, { driveId: f.id, updatedAt: +f.appProperties.updatedAt || 0 });
+      }
+      // 1) sơ đồ đã xóa ở máy này → bỏ vào thùng rác Drive
+      for (const id of st.deleted || []) {
+        const r = remote.get(id) || (st.maps[id] && { driveId: st.maps[id].driveId });
+        if (r) await this.trash(r.driveId).catch(() => {});
+        remote.delete(id); delete st.maps[id];
+      }
+      st.deleted = [];
+      const upload = async m => {
+        const meta = { name: `${safeName(m.title)}.sodo.json`, mimeType: 'application/json', appProperties: { kind: 'map', sodoId: m.id, updatedAt: String(m.updatedAt) } };
+        if (!st.maps[m.id]?.driveId && !remote.has(m.id)) meta.parents = [root];
+        const driveId = await this.put(remote.get(m.id)?.driveId || st.maps[m.id]?.driveId, meta, new Blob([JSON.stringify({ ...m, view: undefined })], { type: 'application/json' }));
+        st.maps[m.id] = { driveId, syncedAt: m.updatedAt };
+      };
+      const fetchMap = async r => {
+        const m = JSON.parse(await (await this.download(r.driveId)).text());
+        m.root = normalizeNode(m.root); m.relations ||= [];
+        return m;
+      };
+      const saveLocal = m => { let t = null; try { t = makeThumb(m); } catch {} Store.save(m, t); changedHere = true; };
+      // 2) so từng sơ đồ trên máy với bản trên Drive
+      for (const e of Store.index()) {
+        const m = Store.load(e.id); if (!m) continue;
+        const rec = st.maps[m.id], r = remote.get(m.id);
+        remote.delete(m.id);
+        if (!r) {
+          if (rec && m.updatedAt <= rec.syncedAt && S.map?.id !== m.id) { Store.remove(m.id); delete st.maps[m.id]; changedHere = true; continue; } // đã xóa ở máy khác
+          await upload(m); continue;
+        }
+        if (r.updatedAt === m.updatedAt) { st.maps[m.id] = { driveId: r.driveId, syncedAt: m.updatedAt }; continue; }
+        // Sơ đồ hướng dẫn mặc định chưa ai sửa thì không tính là thay đổi
+        const pristine = m.id === 'welcome' && m.updatedAt === m.createdAt;
+        const localChanged = rec ? m.updatedAt > rec.syncedAt : !pristine, remoteChanged = !rec || r.updatedAt > rec.syncedAt;
+        if (localChanged && !remoteChanged) { await upload(m); continue; }
+        const rm = await fetchMap(r);
+        if (remoteChanged && localChanged) {
+          // cả hai nơi cùng sửa: giữ bản mới hơn, bản kia lưu thành sơ đồ riêng
+          const [keep, other] = rm.updatedAt >= m.updatedAt ? [rm, m] : [m, rm];
+          const copy = { ...other, id: uid(), title: `${other.title} (bản xung đột ${new Date(other.updatedAt).toLocaleString('vi-VN')})` };
+          saveLocal(copy); await upload(copy);
+          if (keep === rm) { saveLocal(rm); this.applyOpen(rm); st.maps[m.id] = { driveId: r.driveId, syncedAt: rm.updatedAt }; }
+          else await upload(m);
+          toast(`“${m.title}” được sửa ở hai nơi — đã giữ cả hai bản.`, 5000);
+        } else { saveLocal(rm); this.applyOpen(rm); st.maps[m.id] = { driveId: r.driveId, syncedAt: rm.updatedAt }; }
+      }
+      // 3) sơ đồ chỉ có trên Drive → tải về
+      for (const [id, r] of remote) {
+        if (st.maps[id] && !Store.load(id)) { await this.trash(r.driveId).catch(() => {}); delete st.maps[id]; continue; }
+        const m = await fetchMap(r); saveLocal(m); st.maps[id] = { driveId: r.driveId, syncedAt: m.updatedAt };
+      }
+      // 4) tải các tệp đính kèm chưa có trên Drive
+      const need = new Map();
+      for (const e of Store.index()) { const m = Store.load(e.id); if (m) walk(m.root, n => n.files?.forEach(f => { if (!st.files[f.id]) need.set(f.id, f); })); }
+      for (const [fid, f] of need) {
+        const rec = await FileStore.get(fid).catch(() => null);
+        if (!rec) continue;
+        const meta = { name: f.name, parents: [st.filesFolder], appProperties: { kind: 'file', sodoFile: fid } };
+        st.files[fid] = rec.blob.size > 4 * 1024 * 1024 ? await this.putLarge(meta, rec.blob) : await this.put(null, meta, rec.blob);
+        this.setState(st);
+      }
+      st.lastSync = Date.now();
+      this.status = '';
+    } catch (err) {
+      this.status = err.relogin ? '' : 'error';
+      if (manual || !err.relogin) toast(err.message || 'Đồng bộ Google Drive thất bại', 4500);
+      console.warn(err);
+      throw err;
+    } finally {
+      this.setState({ ...(this.state() || {}), ...st });
+      this.busy = false; updateDriveUI();
+      if (changedHere && !$('#home').hidden) renderMapGrid();
+      if (this.again) { this.again = false; this.scheduleSync(500); }
+    }
+  },
+  /** Nếu sơ đồ đang mở được cập nhật từ máy khác và ở đây chưa sửa gì → hiện bản mới. */
+  applyOpen(m) {
+    if (!S.map || S.map.id !== m.id || S.temp) return;
+    if (S.dirty || S.editing) return;
+    const view = { ...S.view };
+    showMap(m); S.view = view; applyView();
+    toast('Sơ đồ vừa được cập nhật từ máy khác');
+  },
+  /** Tệp đính kèm không có trên máy này → tìm trên Drive. */
+  async fetchFile(meta) {
+    if (!this.connected() || !this.hasToken()) return null;
+    const st = this.state();
+    let driveId = st.files?.[meta.id];
+    if (!driveId) driveId = (await this.list(`trashed=false and appProperties has { key='sodoFile' and value='${meta.id}' }`, 'id'))[0]?.id;
+    if (!driveId) return null;
+    const blob = await this.download(driveId);
+    const rec = { blob, name: meta.name, type: meta.type };
+    await FileStore.put(meta.id, rec).catch(() => {});
+    return rec;
+  },
+};
+function updateDriveUI() {
+  const st = Drive.state();
+  const text = !st ? 'Google Drive'
+    : Drive.status === 'syncing' ? 'Đang đồng bộ…'
+    : !Drive.hasToken() ? 'Drive: bấm để đồng bộ'
+    : Drive.status === 'error' ? 'Drive: lỗi đồng bộ'
+    : st.lastSync ? `Đã đồng bộ ${timeAgo(st.lastSync)}` : 'Google Drive';
+  $$('[data-act="drive"]').forEach(b => {
+    b.hidden = !Drive.clientId();
+    b.querySelector('.lbl').textContent = text;
+    b.classList.toggle('warn', !!st && (!Drive.hasToken() || Drive.status === 'error'));
+    b.classList.toggle('ok', !!st && Drive.hasToken() && !Drive.status);
+    b.title = st ? `Google Drive: ${st.email}` : 'Đồng bộ sơ đồ qua Google Drive';
+  });
+}
+async function driveDialog() {
+  const st = Drive.state();
+  if (!Drive.clientId()) {
+    modal({ title: 'Đồng bộ Google Drive', body: '<p>Tính năng này chưa được bật cho trang web này (thiếu mã đăng nhập Google). Hãy liên hệ người quản trị trang.</p>' });
+    return;
+  }
+  if (!st) {
+    const ok = await modal({
+      title: 'Đồng bộ qua Google Drive',
+      body: `<p>Lưu tất cả sơ đồ và tệp đính kèm vào thư mục <b>Sodo</b> trong Google Drive của bạn. Mở Sodo trên máy khác, đăng nhập cùng tài khoản là có đủ sơ đồ.</p>
+        <p class="muted" style="font-size:13px">Sodo chỉ xem được các tệp do chính nó tạo trong Drive của bạn, không đọc được tài liệu khác. Dữ liệu đi thẳng từ trình duyệt tới Google, không qua máy chủ nào khác.</p>`,
+      actions: [{ label: 'Hủy', value: false }, { label: 'Đăng nhập Google', primary: true, value: true }],
+    });
+    if (!ok) return;
+    try { await Drive.login(); toast('Đã kết nối ' + (Drive.state()?.email || 'Google Drive')); await Drive.sync({ manual: true }); }
+    catch (err) { if (!Drive.state()?.lastSync) Drive.setState(null); updateDriveUI(); toast(err.message, 5000); }
+    return;
+  }
+  if (!Drive.hasToken()) {
+    try { await Drive.sync({ manual: true }); } catch {}
+    return;
+  }
+  const act = await modal({
+    title: 'Google Drive',
+    body: `<p>Đang đồng bộ với <b>${esc(st.email)}</b>.</p><p class="muted">Lần đồng bộ gần nhất: ${st.lastSync ? timeAgo(st.lastSync) : 'chưa có'} · ${Object.keys(st.maps || {}).length} sơ đồ · ${Object.keys(st.files || {}).length} tệp.</p>
+      <p class="muted" style="font-size:13px">Sơ đồ nằm trong thư mục “Sodo” trên Drive. Mỗi lần mở trang, bấm nút Drive một lần để tiếp tục tự động đồng bộ.</p>`,
+    actions: [{ label: 'Ngắt kết nối', value: 'logout' }, { label: 'Đóng', value: null }, { label: 'Đồng bộ ngay', primary: true, value: 'sync' }],
+  });
+  if (act === 'sync') { try { await Drive.sync({ manual: true }); toast('Đã đồng bộ xong'); } catch {} }
+  if (act === 'logout' && await confirmBox('Ngắt kết nối Google Drive?', 'Sơ đồ trên máy này và trên Drive vẫn giữ nguyên, chỉ ngừng đồng bộ.', 'Ngắt kết nối')) Drive.logout();
 }
 
 /* =====================================================================
@@ -2514,6 +2777,7 @@ const ACTIONS = {
   'ai-create': aiCreateMap,
   'ai-settings': aiSettings,
   'install-app': installApp,
+  drive: driveDialog,
   quiz: () => (S.quiz ? stopQuiz() : startQuiz()),
   'quiz-exit': stopQuiz,
   'quiz-all': () => quizAll(true),
@@ -2608,7 +2872,12 @@ function dupMap(el) {
 }
 async function delMap(el) {
   const m = Store.index().find(x => x.id === el.dataset.id); if (!m) return;
-  if (await confirmBox('Xóa sơ đồ?', `“${m.title}” sẽ bị xóa vĩnh viễn khỏi trình duyệt này.`)) { Store.remove(m.id); renderMapGrid(); }
+  const st = Drive.state();
+  if (await confirmBox('Xóa sơ đồ?', st ? `“${m.title}” sẽ bị xóa khỏi trình duyệt này và chuyển vào thùng rác Google Drive.` : `“${m.title}” sẽ bị xóa vĩnh viễn khỏi trình duyệt này.`)) {
+    Store.remove(m.id);
+    if (st) { st.deleted = [...new Set([...(st.deleted || []), m.id])]; Drive.setState(st); Drive.scheduleSync(500); }
+    renderMapGrid();
+  }
 }
 async function importFromText() {
   const text = await modal({
@@ -2672,7 +2941,7 @@ function showMap(map, { temp = false } = {}) {
   walk(map.root, n => { if (n.link) { n.links = [{ url: n.link }, ...(n.links || [])]; delete n.link; } });
   $('#shared-bar').hidden = !temp;
   map.relations ||= []; map.layout ||= 'map'; map.theme ||= 'classic';
-  Object.assign(S, { map, sel: map.root.id, selRel: null, editing: null, undo: [], redo: [], relFrom: null, matches: null, matchList: [], presenting: null, quiz: null, panelTab: 'map' });
+  Object.assign(S, { map, sel: map.root.id, selRel: null, editing: null, undo: [], redo: [], relFrom: null, matches: null, matchList: [], presenting: null, quiz: null, dirty: false, panelTab: 'map' });
   reindex();
   if (!temp) preloadImages(map).then(() => { if (S.map === map) saveNow(true); });
   $('#home').hidden = true; $('#editor').hidden = false;
@@ -2742,10 +3011,15 @@ window.addEventListener('offline', () => toast('Mất kết nối mạng — v�
     localStorage.setItem('sodo.welcomed', '1');
     if (!Store.index().length) {
       const m = mapFromTemplate(GUIDE); m.title = 'Hướng dẫn sử dụng Sodo';
+      m.id = 'welcome'; m.updatedAt = m.createdAt; // cùng id trên mọi máy để đồng bộ không bị trùng
       let thumb = null; try { thumb = makeThumb(m); } catch {}
       Store.save(m, thumb);
     }
   }
   route();
   setTimeout(gcFiles, 3000);
+  updateDriveUI();
+  setInterval(updateDriveUI, 60000);
+  if (Drive.connected() && Drive.clientId()) loadScript('https://accounts.google.com/gsi/client').catch(() => {});
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) Drive.scheduleSync(1000); });
 })();

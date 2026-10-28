@@ -155,7 +155,10 @@ function cloneFresh(n) {
 }
 function normalizeNode(n) {
   const out = { id: n.id || uid(), text: String(n.text ?? ''), children: (n.children || []).map(normalizeNode) };
-  for (const k of ['icon', 'note', 'link', 'collapsed', 'side', 'style']) if (n[k] != null && n[k] !== '') out[k] = n[k];
+  for (const k of ['icon', 'note', 'collapsed', 'side', 'style', 'image']) if (n[k] != null && n[k] !== '') out[k] = n[k];
+  const links = [...(n.link ? [{ url: n.link }] : []), ...(Array.isArray(n.links) ? n.links : [])].filter(l => l?.url);
+  if (links.length) out.links = links.map(l => (l.title ? { url: String(l.url), title: String(l.title) } : { url: String(l.url) }));
+  if (Array.isArray(n.files) && n.files.length) out.files = n.files.filter(f => f?.id).map(f => ({ id: f.id, name: String(f.name || 'tệp'), size: +f.size || 0, type: f.type || '' }));
   return out;
 }
 function newMap(root, title, extra = {}) {
@@ -198,7 +201,7 @@ function parseOutline(text) {
     const md = /^\[(.+?)\]\((https?:\/\/[^)]+)\)$/.exec(body);
     if (md) { body = md[1]; link = md[2]; }
     const node = { id: uid(), text: body, children: [] };
-    if (link) node.link = link;
+    if (link) node.links = [{ url: link }];
     while (stack.length && stack[stack.length - 1].key >= key) stack.pop();
     if (stack.length) stack[stack.length - 1].node.children.push(node); else roots.push(node);
     stack.push({ key, node });
@@ -217,7 +220,8 @@ function toMarkdown(root) {
   if (root.note) root.note.split('\n').forEach(l => out.push('> ' + l));
   out.push('');
   const rec = (n, d) => {
-    const t = n.link ? `[${n.text}](${n.link})` : n.text;
+    const [first, ...more] = n.links || [];
+    const t = (first ? `[${n.text}](${first.url})` : n.text) + more.map(l => ` · [${linkLabel(l)}](${l.url})`).join('');
     out.push(`${'  '.repeat(d)}- ${n.icon ? n.icon + ' ' : ''}${t.replace(/\n/g, ' ')}`);
     if (n.note) n.note.split('\n').forEach(l => out.push(`${'  '.repeat(d + 1)}> ${l}`));
     n.children.forEach(c => rec(c, d + 1));
@@ -231,7 +235,7 @@ function toPlainOutline(node) {
   return out.join('\n');
 }
 function toFreeMind(root) {
-  const rec = n => `<node TEXT="${esc(n.text)}"${n.link ? ` LINK="${esc(n.link)}"` : ''}${n.side ? ` POSITION="${n.side}"` : ''}${n.collapsed ? ' FOLDED="true"' : ''}>` +
+  const rec = n => `<node TEXT="${esc(n.text)}"${n.links?.length ? ` LINK="${esc(n.links[0].url)}"` : ''}${n.side ? ` POSITION="${n.side}"` : ''}${n.collapsed ? ' FOLDED="true"' : ''}>` +
     (n.note ? `<richcontent TYPE="NOTE"><html><body><p>${esc(n.note)}</p></body></html></richcontent>` : '') +
     n.children.map(rec).join('') + '</node>';
   return `<map version="1.0.1">\n${rec(root)}\n</map>\n`;
@@ -243,7 +247,7 @@ function parseXmlTree(text) {
   if (fm) {
     const rec = el => {
       const n = { id: uid(), text: el.getAttribute('TEXT') || '', children: [] };
-      if (el.getAttribute('LINK')) n.link = el.getAttribute('LINK');
+      if (el.getAttribute('LINK')) n.links = [{ url: el.getAttribute('LINK') }];
       if (el.getAttribute('FOLDED') === 'true') n.collapsed = true;
       const pos = el.getAttribute('POSITION'); if (pos === 'left' || pos === 'right') n.side = pos;
       const note = el.querySelector(':scope > richcontent[TYPE="NOTE"]');
@@ -577,7 +581,7 @@ function computeLayout(map) {
     const textW = Math.ceil(Math.max(depth === 0 ? 40 : 16, ...(mlines ? mlines.map(l => l.w) : lines.map(l => tw(l, font))))) + 2;
     const textH = mlines ? mlines.reduce((a, l) => a + l.h, 0) : lines.length * lh;
     const iconW = n.icon ? Math.round(fs * 1.25) + 4 : 0;
-    const nInd = (n.note ? 1 : 0) + (n.link ? 1 : 0);
+    const nInd = (n.note ? 1 : 0) + (n.links?.length ? 1 : 0) + (n.files?.length ? 1 : 0);
     const indW = nInd ? nInd * 18 + 4 : 0;
     // Ảnh (nếu có) nằm phía trên dòng chữ; hàng chữ được căn giữa theo bề rộng ảnh
     const contentW = iconW + textW + indW;
@@ -764,7 +768,8 @@ function drawNodeCanvas(ctx, b) {
     ctx.font = `12px ${EMOJI_FONT}`;
     let ix = x + b.textW + 6;
     if (b.node.note) { ctx.fillText('📝', ix, midY); ix += 18; }
-    if (b.node.link) ctx.fillText('🔗', ix, midY);
+    if (b.node.links?.length) { ctx.fillText('🔗', ix, midY); ix += 18; }
+    if (b.node.files?.length) ctx.fillText('📎', ix, midY);
   }
 }
 function renderSVG(map) {
@@ -785,7 +790,7 @@ function renderSVG(map) {
     if (b.node.icon) { o.push(`<text x="${x}" y="${midY}" font-size="${b.fs}" dominant-baseline="central">${esc(b.node.icon)}</text>`); x += b.iconW; }
     if (b.mlines) o.push(`<g transform="translate(${x} ${top})">${mathBlockSVG(b)}</g>`);
     else b.lines.forEach((l, i) => o.push(`<text x="${x}" y="${top + b.lh * (i + 0.5)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" dominant-baseline="central" xml:space="preserve">${esc(l)}</text>`));
-    if (b.indW) o.push(`<text x="${x + b.textW + 6}" y="${midY}" font-size="12" dominant-baseline="central">${b.node.note ? '📝' : ''}${b.node.link ? '🔗' : ''}</text>`);
+    if (b.indW) o.push(`<text x="${x + b.textW + 6}" y="${midY}" font-size="12" dominant-baseline="central">${b.node.note ? '📝' : ''}${b.node.links?.length ? '🔗' : ''}${b.node.files?.length ? '📎' : ''}</text>`);
   }
   for (const r of map.relations || []) {
     const g = relGeom(r, L); if (!g) continue;
@@ -918,7 +923,8 @@ function renderNodes(L, pf) {
     if (b.indW) {
       inner += '<span class="inds">' +
         (n.note ? `<span class="ind" data-act="ind-note" data-id="${b.id}" title="${esc(n.note)}">📝</span>` : '') +
-        (n.link ? `<span class="ind" data-act="ind-link" data-id="${b.id}" title="${esc(n.link)}">🔗</span>` : '') + '</span>';
+        (n.links?.length ? `<span class="ind" data-act="ind-link" data-id="${b.id}" title="${esc(n.links.map(linkLabel).join('\n'))}">🔗</span>` : '') +
+        (n.files?.length ? `<span class="ind" data-act="ind-files" data-id="${b.id}" title="${esc(n.files.map(f => f.name).join('\n'))}">📎</span>` : '') + '</span>';
     }
     if (!S.presenting) {
       const [tx, ty] = togglePos(b);
@@ -1478,6 +1484,22 @@ function nodePanel() {
   const shapes = [['', 'Mặc định'], ['rounded', 'Bo góc'], ['rect', 'Vuông'], ['pill', 'Viên thuốc'], ['underline', 'Gạch chân'], ['none', 'Chỉ chữ']];
   const bold = b ? /^(italic )?(\d+)/.exec(b.font)[2] >= 600 : false;
   return `
+  <div class="pn-sec"><div class="pn-label">Ghi chú</div><textarea id="pn-note" class="field" rows="3" placeholder="Thêm ghi chú cho nút…">${esc(n.note || '')}</textarea></div>
+  <div class="pn-sec" id="pn-links"><div class="pn-label">Liên kết web ${n.links?.length ? `(${n.links.length})` : ''}</div>
+    ${(n.links || []).map((l, i) => `<div class="att-row"><span class="pi">🔗</span><a class="pt" href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.url)}">${esc(linkLabel(l))}${l.title ? `<small>${esc(l.url)}</small>` : ''}</a>
+      <button class="xbtn" data-act="link-up" data-val="${i}" title="Đưa lên đầu" ${i ? '' : 'hidden'}>↑</button><button class="xbtn" data-act="link-del" data-val="${i}" title="Bỏ link">×</button></div>`).join('')}
+    <input id="pn-link-url" class="field" placeholder="Dán địa chỉ web, link Google Drive, YouTube…" style="margin-top:6px">
+    <div class="row" style="margin-top:6px"><input id="pn-link-title" class="field" placeholder="Tên hiển thị (không bắt buộc)" style="flex:1"><button class="btn small" data-act="link-add">Thêm</button></div></div>
+  <div class="pn-sec" id="pn-files"><div class="pn-label">Tệp đính kèm ${n.files?.length ? `(${n.files.length})` : ''}</div>
+    ${(n.files || []).map(f => `<div class="att-row"><span class="pi">${fileIcon(f.name, f.type)}</span><button class="pt" data-act="file-open" data-val="${f.id}" title="Mở">${esc(f.name)}<small>${fmtSize(f.size)}</small></button>
+      <button class="xbtn" data-act="file-save" data-val="${f.id}" title="Tải về">⤓</button><button class="xbtn" data-act="file-del" data-val="${f.id}" title="Bỏ tệp">×</button></div>`).join('')}
+    <button class="btn" style="width:100%;justify-content:center;margin-top:6px" data-act="file-pick" data-icon="upload">Đính kèm tệp…</button>
+    <div class="muted" style="font-size:12px;margin-top:6px">PDF, Word, PowerPoint, Excel, video… (tối đa 100 MB/tệp). Có thể kéo thả tệp vào nút. Tệp chỉ lưu trên máy này.</div></div>
+  <div class="pn-sec"><div class="pn-label">Hình ảnh</div>
+    ${n.image ? `<div class="seg" style="margin-bottom:8px">${IMG_SIZES.map(([l, v]) => `<button class="${(n.image.dw || 200) === v ? 'on' : ''}" data-act="img-size" data-val="${v}">${l}</button>`).join('')}</div>
+      <div class="acts-grid"><button class="btn" data-act="img-pick" data-icon="image">Đổi ảnh</button><button class="btn del" data-act="img-remove" data-icon="trash">Bỏ ảnh</button></div>`
+    : `<button class="btn" style="width:100%;justify-content:center" data-act="img-pick" data-icon="image">Chèn ảnh…</button>
+      <div class="muted" style="font-size:12px;margin-top:6px">Hoặc dán (Ctrl+V) / kéo thả ảnh vào nút.</div>`}</div>
   <div class="pn-sec"><div class="pn-label">Màu nhánh ${st.color ? '<button data-act="set" data-key="color" data-val="">Mặc định</button>' : ''}</div>${swatches('color', SWATCH, st.color)}</div>
   <div class="pn-sec"><div class="pn-label">Nền</div>${swatches('fill', FILLS, st.fill, { none: true })}</div>
   <div class="pn-sec"><div class="pn-label">Màu chữ</div>${swatches('textColor', TEXTS, st.textColor, { none: true })}</div>
@@ -1490,13 +1512,6 @@ function nodePanel() {
     <div class="muted" style="font-size:12px;margin-top:8px">Công thức: gõ giữa hai dấu $, ví dụ <code>$x^2+1$</code>, <code>$\\frac{a}{b}$</code>, <code>$\\sqrt{2}$</code>.</div></div>
   <div class="pn-sec"><div class="pn-label">Biểu tượng ${n.icon ? '<button data-act="set-icon" data-val="">Bỏ</button>' : ''}</div>
     <div class="emoji-grid">${EMOJIS.map(e => `<button class="${n.icon === e ? 'on' : ''}" data-act="set-icon" data-val="${e}">${e}</button>`).join('')}</div></div>
-  <div class="pn-sec"><div class="pn-label">Hình ảnh</div>
-    ${n.image ? `<div class="seg" style="margin-bottom:8px">${IMG_SIZES.map(([l, v]) => `<button class="${(n.image.dw || 200) === v ? 'on' : ''}" data-act="img-size" data-val="${v}">${l}</button>`).join('')}</div>
-      <div class="acts-grid"><button class="btn" data-act="img-pick" data-icon="image">Đổi ảnh</button><button class="btn del" data-act="img-remove" data-icon="trash">Bỏ ảnh</button></div>`
-    : `<button class="btn" style="width:100%;justify-content:center" data-act="img-pick" data-icon="image">Chèn ảnh…</button>
-      <div class="muted" style="font-size:12px;margin-top:6px">Hoặc dán (Ctrl+V) / kéo thả ảnh vào nút.</div>`}</div>
-  <div class="pn-sec"><div class="pn-label">Ghi chú</div><textarea id="pn-note" class="field" rows="3" placeholder="Thêm ghi chú cho nút…">${esc(n.note || '')}</textarea></div>
-  <div class="pn-sec"><div class="pn-label">Liên kết web</div><input id="pn-link" class="field" placeholder="https://…" value="${esc(n.link || '')}"></div>
   <div class="pn-sec"><div class="acts-grid">
     <button class="btn" data-act="add-child" data-icon="child">Nút con</button>
     <button class="btn" data-act="add-sibling" data-icon="sibling">Cùng cấp</button>
@@ -1547,15 +1562,12 @@ panelBody.addEventListener('input', e => {
   if (t.id === 'pn-note') { const n = getNode(S.sel); if (n) { if (t.value) n.note = t.value; else delete n.note; render(); } }
   if (t.id === 'pn-rel-label') { const r = S.map.relations.find(x => x.id === S.selRel); if (r) { r.label = t.value; render(); } }
 });
+panelBody.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.target.id === 'pn-link-url' || e.target.id === 'pn-link-title')) { e.preventDefault(); addLink(); }
+});
 panelBody.addEventListener('change', e => {
   const t = e.target;
   if (t.type === 'color') { setStyle(t.dataset.key, t.value); return; }
-  if (t.id === 'pn-link') {
-    const n = getNode(S.sel); let v = t.value.trim();
-    if (v && !/^[a-z]+:/i.test(v)) v = 'https://' + v;
-    if (n && (n.link || '') !== v) { pushHist(panelSnap || snap()); if (v) n.link = v; else delete n.link; changed(); }
-    return;
-  }
   if ((t.id === 'pn-note' || t.id === 'pn-rel-label') && panelSnap && panelSnap !== snap()) { pushHist(panelSnap); panelSnap = snap(); scheduleSave(); render(); }
 });
 
@@ -1629,7 +1641,8 @@ function closeSearch() {
 function runSearch(q) {
   const f = fold(q.trim());
   S.matches = new Set(); S.matchList = []; S.matchIdx = -1;
-  if (f) walk(S.map.root, n => { if (fold(n.text).includes(f) || fold(n.note).includes(f)) { S.matches.add(n.id); S.matchList.push(n.id); } });
+  const hay = n => [n.text, n.note, ...(n.links || []).map(l => l.title || l.url), ...(n.files || []).map(x => x.name)].map(fold).join('\n');
+  if (f) walk(S.map.root, n => { if (hay(n).includes(f)) { S.matches.add(n.id); S.matchList.push(n.id); } });
   $('#search-count').textContent = f ? `${S.matchList.length} kết quả` : '';
   render();
 }
@@ -1737,16 +1750,166 @@ canvas.addEventListener('dragover', e => {
 });
 canvas.addEventListener('dragleave', e => { if (!canvas.contains(e.relatedTarget)) showDrop(null); });
 canvas.addEventListener('drop', e => {
-  const file = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
-  if (!file) return;
+  const all = [...e.dataTransfer.files];
+  if (!all.length) return;
   e.preventDefault(); showDrop(null);
   const nodeEl = e.target.closest('.node');
+  // Một ảnh duy nhất → chèn làm hình của nút; còn lại → đính kèm tệp
+  if (!(all.length === 1 && all[0].type.startsWith('image/'))) { attachFiles(nodeEl?.dataset.id || S.sel || S.map.root.id, all); return; }
+  const file = all[0];
   if (nodeEl) { insertImage(nodeEl.dataset.id, file); return; }
   // Thả ra khoảng trống: tạo nhánh mới chứa ảnh dưới nút đang chọn (hoặc chủ đề trung tâm)
   const id = addChild(S.sel || S.map.root.id, { edit: false });
   const n = getNode(id); n.text = file.name.replace(/\.[^.]+$/, '');
   insertImage(id, file);
 });
+
+/* =====================================================================
+   LIÊN KẾT & TỆP ĐÍNH KÈM
+   Tệp được lưu trong IndexedDB của trình duyệt (dung lượng lớn hơn nhiều so với
+   localStorage); sơ đồ chỉ giữ thông tin mô tả { id, name, size, type }.
+   ===================================================================== */
+const FILE_MAX = 100 * 1024 * 1024;
+const FileStore = {
+  _db: null,
+  open() {
+    return (this._db ||= new Promise((res, rej) => {
+      const r = indexedDB.open('sodo-files', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('files');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    }));
+  },
+  async run(mode, fn) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('files', mode), req = fn(t.objectStore('files'));
+      t.oncomplete = () => res(req?.result);
+      t.onerror = () => rej(t.error);
+      t.onabort = () => rej(t.error || new Error('Không lưu được tệp (bộ nhớ trình duyệt có thể đã đầy).'));
+    });
+  },
+  put(id, rec) { return this.run('readwrite', st => st.put(rec, id)); },
+  get(id) { return this.run('readonly', st => st.get(id)); },
+  keys() { return this.run('readonly', st => st.getAllKeys()); },
+  del(id) { return this.run('readwrite', st => st.delete(id)); },
+};
+/** Xóa các tệp không còn sơ đồ nào dùng tới (chạy lúc mở trang, khi không còn lịch sử hoàn tác). */
+async function gcFiles() {
+  try {
+    const used = new Set();
+    for (const e of Store.index()) { const m = Store.load(e.id); if (m) walk(m.root, n => { n.files?.forEach(f => used.add(f.id)); }); }
+    for (const k of await FileStore.keys()) if (!used.has(k)) await FileStore.del(k);
+  } catch (err) { console.warn('Dọn tệp đính kèm thất bại', err); }
+}
+const fmtSize = b => (b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1).replace('.', ',') + ' MB');
+function fileIcon(name, type = '') {
+  const ext = (/\.([a-z0-9]+)$/i.exec(name)?.[1] || '').toLowerCase();
+  if (ext === 'pdf') return '📕';
+  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '📘';
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(ext)) return '📗';
+  if (['ppt', 'pptx', 'odp'].includes(ext)) return '📙';
+  if (type.startsWith('image/')) return '🖼️';
+  if (type.startsWith('video/')) return '🎬';
+  if (type.startsWith('audio/')) return '🎵';
+  if (['zip', 'rar', '7z'].includes(ext)) return '🗜️';
+  return '📄';
+}
+async function attachFiles(id, files) {
+  const n = getNode(id);
+  if (!n || !files.length) return;
+  const added = [];
+  for (const f of files) {
+    if (f.size > FILE_MAX) { toast(`“${f.name}” lớn hơn 100 MB — hãy gắn link Google Drive thay vì đính kèm.`, 4500); continue; }
+    const meta = { id: uid(), name: f.name, size: f.size, type: f.type || '' };
+    try { await FileStore.put(meta.id, { blob: f, name: f.name, type: f.type }); added.push(meta); }
+    catch (err) { console.error(err); toast(err.message || `Không lưu được “${f.name}”`, 4000); }
+  }
+  if (!added.length) return;
+  commit(() => { n.files = [...(n.files || []), ...added]; S.sel = id; S.panelTab = 'node'; });
+  toast(added.length === 1 ? `Đã đính kèm “${added[0].name}”` : `Đã đính kèm ${added.length} tệp`);
+}
+const VIEWABLE = /^(application\/pdf|image\/|text\/|video\/|audio\/)/;
+async function openFile(meta, { save = false } = {}) {
+  // Mở cửa sổ ngay khi bấm để trình duyệt không chặn, rồi mới đọc tệp
+  const win = !save && VIEWABLE.test(meta.type) ? window.open('', '_blank') : null;
+  let rec;
+  try { rec = await FileStore.get(meta.id); } catch (err) { console.error(err); }
+  if (!rec) {
+    win?.close();
+    toast('Tệp này không có trong trình duyệt này (sơ đồ được mở từ máy khác hoặc từ link chia sẻ). Hãy nhập tệp .json có kèm tệp.', 5000);
+    return;
+  }
+  if (win) { win.location.href = URL.createObjectURL(rec.blob); return; }
+  download(meta.name, rec.blob);
+}
+function findFile(fid) {
+  let hit = null;
+  walk(S.map.root, n => { const f = n.files?.find(x => x.id === fid); if (f) hit = { node: n, file: f }; });
+  return hit;
+}
+function normUrl(v) {
+  v = String(v || '').trim();
+  if (!v) return '';
+  return /^[a-z][a-z0-9+.-]*:/i.test(v) ? v : 'https://' + v;
+}
+const linkLabel = l => l.title || l.url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+function addLink() {
+  const n = getNode(S.sel); if (!n) return;
+  const url = normUrl($('#pn-link-url')?.value), title = $('#pn-link-title')?.value.trim() || '';
+  if (!url) { toast('Hãy nhập địa chỉ web'); $('#pn-link-url')?.focus(); return; }
+  document.activeElement?.blur();
+  commit(() => { n.links = [...(n.links || []), title ? { url, title } : { url }]; });
+}
+/** Danh sách nhỏ bật ra cạnh biểu tượng 🔗/📎 trên nút. */
+function showPopover(anchor, items) {
+  closePopover();
+  const pop = document.createElement('div');
+  pop.className = 'popover';
+  pop.innerHTML = items.map((it, i) => `<button data-i="${i}"><span class="pi">${it.icon}</span><span class="pt">${esc(it.label)}${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span></button>`).join('');
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = clamp(r.left, 8, innerWidth - pop.offsetWidth - 8) + 'px';
+  pop.style.top = (r.bottom + 6 + pop.offsetHeight > innerHeight ? r.top - pop.offsetHeight - 6 : r.bottom + 6) + 'px';
+  pop.addEventListener('click', e => { const b = e.target.closest('button'); if (b) { closePopover(); items[+b.dataset.i].run(); } });
+  setTimeout(() => document.addEventListener('pointerdown', closePopover, { once: true }), 0);
+  pop.addEventListener('pointerdown', e => e.stopPropagation());
+}
+function closePopover() { $$('.popover').forEach(p => p.remove()); }
+function linksPopover(el, n) {
+  const links = n.links || [];
+  if (links.length === 1) { window.open(links[0].url, '_blank', 'noopener'); return; }
+  showPopover(el, links.map(l => ({ icon: '🔗', label: linkLabel(l), sub: l.title ? l.url : '', run: () => window.open(l.url, '_blank', 'noopener') })));
+}
+function filesPopover(el, n) {
+  showPopover(el, (n.files || []).map(f => ({ icon: fileIcon(f.name, f.type), label: f.name, sub: fmtSize(f.size), run: () => openFile(f) })));
+}
+const fileInput = document.createElement('input');
+fileInput.type = 'file'; fileInput.multiple = true; fileInput.hidden = true;
+document.body.appendChild(fileInput);
+fileInput.addEventListener('change', () => { const fs = [...fileInput.files]; fileInput.value = ''; attachFiles(S.sel, fs); });
+
+/** Gói tệp đính kèm vào bản sao lưu .json để chuyển sang máy khác. */
+async function exportWithFiles(map) {
+  const attachments = {};
+  const metas = [];
+  walk(map.root, n => n.files?.forEach(f => metas.push(f)));
+  for (const f of metas) {
+    const rec = await FileStore.get(f.id).catch(() => null);
+    if (!rec) continue;
+    attachments[f.id] = { name: rec.name, type: rec.type, data: await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(rec.blob); }) };
+  }
+  const out = { ...map, view: undefined };
+  if (Object.keys(attachments).length) out.attachments = attachments;
+  download(safeName(map.title) + '.sodo.json', JSON.stringify(out, null, 2), 'application/json');
+  if (metas.length > Object.keys(attachments).length) toast('Một số tệp đính kèm không có trên máy này nên không được kèm theo.', 4000);
+}
+async function importAttachments(att) {
+  for (const [id, a] of Object.entries(att || {})) {
+    try { const blob = await (await fetch(a.data)).blob(); await FileStore.put(id, { blob, name: a.name, type: a.type }); }
+    catch (err) { console.warn('Không nhập được tệp', a?.name, err); }
+  }
+}
 
 /* =====================================================================
    CHẾ ĐỘ ÔN TẬP — che chữ các nhánh, bấm vào để lật lên
@@ -2200,14 +2363,16 @@ const b64url = bytes => {
 const unb64url = str => Uint8Array.from(atob(str.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
 async function packMap(map) {
   let images = 0;
+  let files = 0;
   const strip = n => {
-    const { image, ...rest } = n;
+    const { image, files: fl, ...rest } = n;
     if (image) images++;
+    files += fl?.length || 0;
     return { ...rest, children: n.children.map(strip) };
   };
   const data = { v: 1, title: map.title, theme: map.theme, layout: map.layout, root: strip(map.root), relations: map.relations };
   const stream = new Blob([JSON.stringify(data)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-  return { code: b64url(new Uint8Array(await new Response(stream).arrayBuffer())), images };
+  return { code: b64url(new Uint8Array(await new Response(stream).arrayBuffer())), images, files };
 }
 async function unpackMap(code) {
   const stream = new Blob([unb64url(code)]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
@@ -2223,6 +2388,7 @@ async function shareMap() {
   const warn = [
     local ? '⚠️ Web đang chạy trên máy của bạn nên người khác chưa mở được link này. Hãy đưa web lên mạng trước.' : '',
     packed.images ? `Link không kèm ${packed.images} ảnh trong sơ đồ (ảnh quá nặng để chứa trong link).` : '',
+    packed.files ? `Link không kèm ${packed.files} tệp đính kèm. Muốn người khác mở được tệp, hãy tải tệp lên Google Drive rồi gắn link Drive vào nút.` : '',
     packed.code.length > 12000 ? 'Sơ đồ khá lớn nên link dài; một số ứng dụng nhắn tin có thể cắt bớt link.' : '',
   ].filter(Boolean);
   await modal({
@@ -2302,7 +2468,15 @@ const ACTIONS = {
   tog: el => toggleCollapse(el.dataset.id),
   'tog-add': el => addChild(el.dataset.id),
   'ind-note': el => { select(el.dataset.id); S.panelOpen = true; syncPanel(); setTimeout(() => $('#pn-note')?.focus(), 30); },
-  'ind-link': el => { const n = getNode(el.dataset.id); if (n?.link) window.open(n.link, '_blank', 'noopener'); },
+  'ind-link': el => { const n = getNode(el.dataset.id); if (n?.links?.length) linksPopover(el, n); },
+  'ind-files': el => { const n = getNode(el.dataset.id); if (n?.files?.length) filesPopover(el, n); },
+  'link-add': addLink,
+  'link-del': el => { const n = getNode(S.sel); if (n?.links) commit(() => { n.links.splice(+el.dataset.val, 1); if (!n.links.length) delete n.links; }); },
+  'link-up': el => { const n = getNode(S.sel); if (n?.links) commit(() => { const [l] = n.links.splice(+el.dataset.val, 1); n.links.unshift(l); }); },
+  'file-pick': () => { if (S.sel) fileInput.click(); },
+  'file-open': el => { const h = findFile(el.dataset.val); if (h) openFile(h.file); },
+  'file-save': el => { const h = findFile(el.dataset.val); if (h) openFile(h.file, { save: true }); },
+  'file-del': el => { const h = findFile(el.dataset.val); if (h) commit(() => { h.node.files = h.node.files.filter(f => f !== h.file); if (!h.node.files.length) delete h.node.files; }); },
   'toggle-outline': () => { S.outlineOpen = !S.outlineOpen; $('#outline').hidden = !S.outlineOpen; $('[data-act="toggle-outline"].tbtn').classList.toggle('on', S.outlineOpen); if (S.outlineOpen) renderOutline(true); },
   'toggle-panel': () => { S.panelOpen = !S.panelOpen; syncPanel(); },
   'panel-tab': el => { S.panelTab = el.dataset.val; renderPanel(); },
@@ -2329,7 +2503,7 @@ const ACTIONS = {
   'export-svg': () => download(safeName(S.map.title) + '.svg', renderSVG(S.map), 'image/svg+xml'),
   'export-md': () => download(safeName(S.map.title) + '.md', toMarkdown(S.map.root), 'text/markdown'),
   'export-mm': () => download(safeName(S.map.title) + '.mm', toFreeMind(S.map.root), 'application/xml'),
-  'export-json': () => download(safeName(S.map.title) + '.sodo.json', JSON.stringify({ ...S.map, view: undefined }, null, 2), 'application/json'),
+  'export-json': () => exportWithFiles(S.map),
   print: printMap,
   'img-pick': () => { if (S.sel) imgInput.click(); },
   'img-remove': () => setProp('image', null),
@@ -2352,7 +2526,7 @@ const ACTIONS = {
   'import-text': importFromText,
   'open-map': el => { location.hash = '#/map/' + el.dataset.id; },
   'rename-map': renameMap, 'dup-map': dupMap, 'del-map': delMap,
-  'export-map': el => { const m = Store.load(el.dataset.id); if (m) download(safeName(m.title) + '.sodo.json', JSON.stringify(m, null, 2), 'application/json'); },
+  'export-map': el => { const m = Store.load(el.dataset.id); if (m) exportWithFiles(m); },
 };
 document.addEventListener('click', e => {
   const dd = e.target.closest('[data-dd]');
@@ -2458,6 +2632,7 @@ $('#file-input').addEventListener('change', async e => {
   try {
     if (/\.json$/i.test(f.name)) {
       const o = JSON.parse(text);
+      if (o.attachments) await importAttachments(o.attachments);
       const root = normalizeNode(o.root || o);
       map = newMap(root, o.title || root.text, { theme: THEMES[o.theme] ? o.theme : 'classic', layout: LAYOUTS[o.layout] ? o.layout : 'map' });
       const ids = new Set(); walk(root, n => { ids.add(n.id); });
@@ -2494,6 +2669,7 @@ function openMap(id) {
 }
 function showMap(map, { temp = false } = {}) {
   S.temp = temp;
+  walk(map.root, n => { if (n.link) { n.links = [{ url: n.link }, ...(n.links || [])]; delete n.link; } });
   $('#shared-bar').hidden = !temp;
   map.relations ||= []; map.layout ||= 'map'; map.theme ||= 'classic';
   Object.assign(S, { map, sel: map.root.id, selRel: null, editing: null, undo: [], redo: [], relFrom: null, matches: null, matchList: [], presenting: null, quiz: null, panelTab: 'map' });
@@ -2571,4 +2747,5 @@ window.addEventListener('offline', () => toast('Mất kết nối mạng — v�
     }
   }
   route();
+  setTimeout(gcFiles, 3000);
 })();

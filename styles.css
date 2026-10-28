@@ -393,3 +393,24 @@ kbd {
 .prov small { flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .free-tag { display: inline-block; font-size: 11px; font-weight: 600; color: #11804a; background: #dcf5e7; border-radius: 5px; padding: 0 6px; }
 .prov-form .pn-label a, .prov-form .pn-label button { font-weight: 500; color: var(--accent); background: none; border: none; padding: 0; font-size: 12px; text-decoration: none; cursor: pointer; }
+
+/* ---------- Liên kết & tệp đính kèm ---------- */
+.att-row { display: flex; align-items: center; gap: 4px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.att-row .pi { width: 22px; text-align: center; flex: none; }
+.att-row .pt {
+  flex: 1; min-width: 0; text-align: left; border: none; background: none; padding: 2px 0; color: var(--ink);
+  text-decoration: none; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.att-row .pt:hover { color: var(--accent); }
+.att-row .pt small, .popover small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.att-row .xbtn { width: 24px; height: 24px; font-size: 14px; flex: none; }
+.popover {
+  position: fixed; z-index: 150; min-width: 220px; max-width: 340px; max-height: 50vh; overflow: auto; padding: 5px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg);
+}
+.popover button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none;
+  padding: 7px 8px; border-radius: 7px;
+}
+.popover button:hover { background: var(--surface-2); }
+.popover .pt { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

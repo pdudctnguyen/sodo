@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sodo — Sơ đồ tư duy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600;1,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ TRANG CHỦ ============ -->
+<div id="home" class="screen">
+  <header class="home-top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32"><circle cx="16" cy="16" r="6" fill="#4f46e5"/><path d="M21 13l6-5M21 19l6 5M11 13L5 8M11 19l-6 5" stroke="#f0643c" stroke-width="2.6" stroke-linecap="round"/><circle cx="27" cy="8" r="2.6" fill="#20a36b"/><circle cx="27" cy="24" r="2.6" fill="#2f80ed"/><circle cx="5" cy="8" r="2.6" fill="#f2a516"/><circle cx="5" cy="24" r="2.6" fill="#e8488a"/></svg>
+      <span>Sodo</span><small>Sơ đồ tư duy</small>
+    </div>
+    <div class="home-actions">
+      <button class="btn" data-act="import-file" data-icon="upload">Nhập tệp</button>
+      <button class="btn" data-act="import-text" data-icon="text">Tạo từ dàn ý</button>
+      <button class="btn" data-act="ai-create" data-icon="sparkle">Tạo bằng AI</button>
+      <button class="btn primary" data-act="new-tpl" data-tpl="blank" data-icon="plus">Sơ đồ mới</button>
+    </div>
+  </header>
+  <main class="home-main">
+    <section>
+      <h2>Bắt đầu từ mẫu</h2>
+      <div id="tpl-grid" class="tpl-grid"></div>
+    </section>
+    <section>
+      <div class="sec-head">
+        <h2>Sơ đồ của tôi</h2>
+        <input id="home-search" class="field" type="search" placeholder="Tìm sơ đồ…">
+      </div>
+      <div id="map-grid" class="map-grid"></div>
+    </section>
+  </main>
+  <input id="file-input" type="file" accept=".json,.md,.markdown,.txt,.mm,.opml,.xml" hidden>
+</div>
+
+<!-- ============ TRÌNH SOẠN THẢO ============ -->
+<div id="editor" class="screen" hidden>
+  <header class="tb">
+    <button class="tbtn" data-act="home" data-icon="back" title="Về danh sách sơ đồ"></button>
+    <input id="map-title" class="title-input" spellcheck="false" aria-label="Tên sơ đồ">
+    <span id="save-state" class="save-state">Đã lưu</span>
+    <span class="tb-sep"></span>
+    <button class="tbtn" data-act="undo" data-icon="undo" title="Hoàn tác (Ctrl+Z)"></button>
+    <button class="tbtn" data-act="redo" data-icon="redo" title="Làm lại (Ctrl+Shift+Z)"></button>
+    <span class="tb-sep"></span>
+    <button class="tbtn wide" data-act="add-child" data-icon="child" title="Thêm nút con (Tab)"><span class="lbl">Nút con</span></button>
+    <button class="tbtn wide" data-act="add-sibling" data-icon="sibling" title="Thêm nút cùng cấp (Enter)"><span class="lbl">Cùng cấp</span></button>
+    <button class="tbtn wide" data-act="relate" data-icon="relate" title="Nối hai nút bằng mũi tên"><span class="lbl">Mối nối</span></button>
+    <button class="tbtn wide" data-act="ai-expand" data-icon="sparkle" title="AI gợi ý ý con cho nút đang chọn"><span class="lbl">AI gợi ý</span></button>
+    <div class="tb-spacer"></div>
+    <button class="tbtn" data-act="quiz" data-icon="quiz" title="Ôn tập: che chữ các nhánh, bấm để lật"></button>
+    <button class="tbtn" data-act="toggle-outline" data-icon="outline" title="Dàn ý"></button>
+    <button class="tbtn" data-act="search" data-icon="search" title="Tìm kiếm (Ctrl+F)"></button>
+    <button class="tbtn" data-act="present" data-icon="play" title="Trình chiếu"></button>
+    <button class="tbtn wide" data-act="share" data-icon="share" title="Chia sẻ bằng link"><span class="lbl">Chia sẻ</span></button>
+    <div class="dd">
+      <button class="tbtn wide" data-dd="export" data-icon="download" title="Xuất / tải về"><span class="lbl">Xuất</span></button>
+      <div class="dd-menu" id="dd-export" hidden>
+        <button data-act="export-png">Ảnh PNG</button>
+        <button data-act="export-svg">Ảnh SVG (vector)</button>
+        <button data-act="print">In / Lưu PDF</button>
+        <hr>
+        <button data-act="export-md">Dàn ý Markdown (.md)</button>
+        <button data-act="export-mm">FreeMind / XMind (.mm)</button>
+        <button data-act="export-json">Tệp Sodo (.json)</button>
+      </div>
+    </div>
+    <button class="tbtn" data-act="toggle-panel" data-icon="panel" title="Ẩn/hiện bảng định dạng"></button>
+    <button class="tbtn" data-act="help" data-icon="help" title="Phím tắt"></button>
+  </header>
+
+  <div class="ed-body">
+    <aside id="outline" class="outline" hidden>
+      <div class="side-head">Dàn ý <button class="xbtn" data-act="toggle-outline" title="Đóng">×</button></div>
+      <div class="ol-tip">Enter: dòng mới · Tab / Shift+Tab: thụt lề</div>
+      <div id="ol-list" class="ol-list"></div>
+    </aside>
+
+    <div id="canvas" class="canvas" tabindex="-1">
+      <div id="world">
+        <svg id="edges" class="layer" width="1" height="1"></svg>
+        <div id="nodes"></div>
+        <svg id="rels" class="layer" width="1" height="1"></svg>
+        <div id="drop-mark" hidden></div>
+        <textarea id="node-editor" spellcheck="false" hidden></textarea>
+      </div>
+
+      <div id="searchbar" class="floatbar searchbar" hidden>
+        <span data-icon="search"></span>
+        <input id="search-input" placeholder="Tìm trong sơ đồ…">
+        <span id="search-count" class="muted"></span>
+        <button class="xbtn" data-act="search-prev" title="Trước">↑</button>
+        <button class="xbtn" data-act="search-next" title="Sau">↓</button>
+        <button class="xbtn" data-act="search-close" title="Đóng">×</button>
+      </div>
+
+      <div id="hint" class="hint" hidden></div>
+
+      <div class="zoombar">
+        <button data-act="zoom-out" title="Thu nhỏ (Ctrl+−)">−</button>
+        <button data-act="zoom-reset" id="zoom-label" title="Về 100%">100%</button>
+        <button data-act="zoom-in" title="Phóng to (Ctrl+=)">+</button>
+        <button data-act="zoom-fit" data-icon="fit" title="Vừa màn hình (Ctrl+0)"></button>
+      </div>
+
+      <div id="quiz-bar" class="floatbar quiz-bar" hidden>
+        <b>Ôn tập</b>
+        <span class="seg-mini">
+          <button data-act="quiz-depth" data-val="1" title="Che mọi nhánh, chỉ hiện chủ đề trung tâm">Che hết</button>
+          <button data-act="quiz-depth" data-val="2" title="Hiện nhánh chính, che các ý con">Che ý con</button>
+        </span>
+        <span id="quiz-count" class="muted"></span>
+        <button class="btn small" data-act="quiz-all">Hiện tất cả</button>
+        <button class="btn small" data-act="quiz-reset">Che lại</button>
+        <button class="xbtn" data-act="quiz-exit" title="Thoát (Esc)">×</button>
+      </div>
+
+      <div id="shared-bar" class="floatbar shared-bar" hidden>
+        <span>Bạn đang xem sơ đồ được chia sẻ — thay đổi sẽ không được lưu.</span>
+        <button class="btn small primary" data-act="save-shared">Lưu vào sơ đồ của tôi</button>
+      </div>
+
+      <div id="present-bar" class="present-bar" hidden>
+        <button data-act="present-prev" title="Trước (←)">‹</button>
+        <span id="present-count">1 / 1</span>
+        <button data-act="present-next" title="Tiếp (→, Space)">›</button>
+        <button data-act="present-exit" title="Thoát (Esc)">×</button>
+      </div>
+    </div>
+
+    <aside id="panel" class="panel">
+      <div class="tabs">
+        <button data-act="panel-tab" data-val="node">Định dạng</button>
+        <button data-act="panel-tab" data-val="map">Sơ đồ</button>
+      </div>
+      <div id="panel-body" class="panel-body"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

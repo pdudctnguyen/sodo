@@ -381,3 +381,15 @@ kbd {
 /* ---------- Xem sơ đồ được chia sẻ ---------- */
 .shared-bar { left: 14px; bottom: 14px; padding: 6px 6px 6px 14px; gap: 12px; font-size: 13px; max-width: calc(100% - 230px); }
 @media (max-width: 760px) { .shared-bar { right: 14px; bottom: 64px; max-width: none; flex-wrap: wrap; } }
+
+/* ---------- Cài đặt AI ---------- */
+.prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; margin: 12px 0 16px; }
+.prov {
+  text-align: left; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface);
+  padding: 9px 11px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+}
+.prov:hover { border-color: var(--line-2); }
+.prov.on { border-color: var(--accent); background: var(--accent-2); }
+.prov small { flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.free-tag { display: inline-block; font-size: 11px; font-weight: 600; color: #11804a; background: #dcf5e7; border-radius: 5px; padding: 0 6px; }
+.prov-form .pn-label a, .prov-form .pn-label button { font-weight: 500; color: var(--accent); background: none; border: none; padding: 0; font-size: 12px; text-decoration: none; cursor: pointer; }

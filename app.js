@@ -1673,16 +1673,39 @@ function updateQuizCount() {
 }
 
 /* =====================================================================
-   AI — tạo sơ đồ / gợi ý ý con bằng Claude (khóa API của người dùng)
+   AI — tạo sơ đồ / gợi ý ý con. Người dùng chọn nhà cung cấp và dùng khóa API
+   của chính mình; khóa lưu trong trình duyệt, gọi thẳng tới máy chủ của hãng.
    ===================================================================== */
+const PROVIDERS = {
+  gemini: { name: 'Gemini', org: 'Google', model: 'gemini-3.8-flash', keyUrl: 'https://aistudio.google.com/apikey', keyHint: 'AIza…', free: true, note: 'Có gói miễn phí, chỉ cần tài khoản Google.' },
+  groq: { name: 'Groq', org: 'Groq', model: 'openai/gpt-oss-120b', keyUrl: 'https://console.groq.com/keys', keyHint: 'gsk_…', free: true, base: 'https://api.groq.com/openai/v1', note: 'Miễn phí (giới hạn số lượt), trả lời rất nhanh.' },
+  openrouter: { name: 'OpenRouter', org: 'OpenRouter', model: 'openrouter/free', keyUrl: 'https://openrouter.ai/settings/keys', keyHint: 'sk-or-…', free: true, base: 'https://openrouter.ai/api/v1', note: 'Một khóa dùng hàng trăm mô hình, có loại miễn phí.' },
+  mistral: { name: 'Mistral', org: 'Mistral AI', model: 'mistral-small-latest', keyUrl: 'https://console.mistral.ai/api-keys', keyHint: '', free: true, base: 'https://api.mistral.ai/v1', note: 'Có gói thử nghiệm miễn phí.' },
+  claude: { name: 'Claude', org: 'Anthropic', model: 'claude-opus-5-5', models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'], keyUrl: 'https://console.anthropic.com/settings/keys', keyHint: 'sk-ant-…', note: 'Nội dung chính xác, mạch lạc nhất. Trả phí theo lượt.' },
+  openai: { name: 'ChatGPT', org: 'OpenAI', model: 'gpt-5.4-mini', keyUrl: 'https://platform.openai.com/api-keys', keyHint: 'sk-…', base: 'https://api.openai.com/v1', note: 'Trả phí theo lượt dùng.' },
+  deepseek: { name: 'DeepSeek', org: 'DeepSeek', model: 'deepseek-flash', keyUrl: 'https://platform.deepseek.com/api_keys', keyHint: 'sk-…', base: 'https://api.deepseek.com', note: 'Giá rất rẻ, cần nạp tiền trước.' },
+};
 const AI = {
-  model: 'claude-opus-5-5',
   sdkUrl: 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.133.0/+esm',
-  key() { try { return localStorage.getItem('sodo.aikey') || ''; } catch { return ''; } },
-  setKey(k) { try { k ? localStorage.setItem('sodo.aikey', k) : localStorage.removeItem('sodo.aikey'); } catch {} },
+  load() {
+    let c = {};
+    try { c = JSON.parse(localStorage.getItem('sodo.ai') || '{}'); } catch {}
+    c.keys ||= {}; c.models ||= {};
+    try { // chuyển khóa Claude từ phiên bản trước
+      const old = localStorage.getItem('sodo.aikey');
+      if (old) { c.keys.claude ||= old; c.provider ||= 'claude'; localStorage.removeItem('sodo.aikey'); localStorage.setItem('sodo.ai', JSON.stringify(c)); }
+    } catch {}
+    if (!PROVIDERS[c.provider]) c.provider = 'gemini';
+    return c;
+  },
+  save(c) { try { localStorage.setItem('sodo.ai', JSON.stringify(c)); } catch {} },
+  current() {
+    const c = this.load(), p = c.provider;
+    return { id: p, ...PROVIDERS[p], key: c.keys[p] || '', model: c.models[p] || PROVIDERS[p].model };
+  },
   async sdk() { return (this._mod ||= import(this.sdkUrl)).then(m => m.default || m.Anthropic); },
   system: `Bạn là trợ lý soạn sơ đồ tư duy cho giáo viên và học sinh Việt Nam.
-Trả lời bằng một dàn ý dạng văn bản thụt lề trong trường "outline":
+Trả lời bằng một dàn ý dạng văn bản thụt lề:
 - Mỗi dòng là một ý ngắn gọn (thường không quá 8 từ), không dùng gạch đầu dòng, không đánh số, không Markdown.
 - Thụt đúng 2 dấu cách cho mỗi cấp.
 - Dòng đầu tiên, không thụt lề, là chủ đề trung tâm.
@@ -1692,12 +1715,22 @@ Viết bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ kh
     properties: { outline: { type: 'string', description: 'Dàn ý thụt lề, mỗi cấp 2 dấu cách' } },
     required: ['outline'], additionalProperties: false,
   },
-  async outline(prompt) {
+
+  /** Gọi AI và trả về dàn ý dạng văn bản thụt lề. */
+  async outline(prompt, cfg = this.current()) {
+    const text = cfg.id === 'claude' ? await this.claude(prompt, cfg)
+      : cfg.id === 'gemini' ? await this.gemini(prompt, cfg)
+      : await this.openaiCompat(prompt, cfg);
+    const outline = cleanAIText(text);
+    if (!outline.trim()) throw new Error('AI không trả về dàn ý.');
+    return outline;
+  },
+  async claude(prompt, cfg) {
     const Anthropic = await this.sdk();
-    const client = new Anthropic({ apiKey: this.key(), dangerouslyAllowBrowser: true });
+    const client = new Anthropic({ apiKey: cfg.key, dangerouslyAllowBrowser: true });
     try {
       const res = await client.beta.messages.create({
-        model: this.model,
+        model: cfg.model,
         max_tokens: 16000,
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
@@ -1708,35 +1741,169 @@ Viết bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ kh
       if (res.stop_reason === 'refusal') throw new Error('AI đã từ chối yêu cầu này. Hãy thử diễn đạt chủ đề khác đi.');
       if (res.stop_reason === 'max_tokens') throw new Error('Dàn ý quá dài, hãy chọn mức chi tiết thấp hơn.');
       const text = res.content.find(b => b.type === 'text')?.text;
-      const outline = text && JSON.parse(text).outline;
-      if (!outline?.trim()) throw new Error('AI không trả về dàn ý.');
-      return outline;
+      return (text && JSON.parse(text).outline) || '';
     } catch (err) {
-      if (err instanceof Anthropic.AuthenticationError) { this.setKey(''); throw new Error('Khóa API không hợp lệ. Hãy nhập lại khóa.'); }
+      if (err instanceof Anthropic.AuthenticationError) throw new Error('Khóa API Claude không hợp lệ. Mở “Cài đặt AI” để nhập lại.');
       if (err instanceof Anthropic.PermissionDeniedError) throw new Error('Khóa API không có quyền dùng mô hình này.');
+      if (err instanceof Anthropic.NotFoundError) throw new Error(`Không có mô hình “${cfg.model}”. Mở “Cài đặt AI” để chọn mô hình khác.`);
       if (err instanceof Anthropic.RateLimitError) throw new Error('Đã vượt giới hạn gọi API, hãy thử lại sau ít phút.');
       if (err instanceof Anthropic.APIConnectionError) throw new Error('Không kết nối được tới máy chủ AI. Kiểm tra mạng.');
-      if (err instanceof Anthropic.APIError) throw new Error(`Lỗi từ máy chủ AI (${err.status ?? '?'}): ${err.message}`);
+      if (err instanceof Anthropic.APIError) throw new Error(`Lỗi từ Claude (${err.status ?? '?'}): ${err.message}`);
       throw err;
     }
   },
+  async gemini(prompt, cfg) {
+    const data = await httpJSON(cfg, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': cfg.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: this.system }] },
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: { type: 'OBJECT', properties: { outline: { type: 'STRING' } }, required: ['outline'] },
+        },
+      }),
+    });
+    const cand = data.candidates?.[0];
+    if (!cand) throw new Error(data.promptFeedback?.blockReason ? 'Gemini đã chặn yêu cầu này. Hãy diễn đạt chủ đề khác đi.' : 'Gemini không trả lời.');
+    if (cand.finishReason === 'MAX_TOKENS') throw new Error('Dàn ý quá dài, hãy chọn mức chi tiết thấp hơn.');
+    if (['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST'].includes(cand.finishReason)) throw new Error('Gemini đã chặn yêu cầu này. Hãy diễn đạt chủ đề khác đi.');
+    const text = (cand.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
+    try { return JSON.parse(text).outline || ''; } catch { return text; }
+  },
+  async openaiCompat(prompt, cfg) {
+    const headers = { Authorization: `Bearer ${cfg.key}`, 'Content-Type': 'application/json' };
+    if (cfg.id === 'openrouter') { headers['X-Title'] = 'Sodo'; headers['HTTP-Referer'] = location.origin; }
+    const data = await httpJSON(cfg, `${cfg.base}/chat/completions`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          { role: 'system', content: this.system + '\nChỉ trả về đúng dàn ý, không có lời dẫn hay lời kết, không đặt trong khối code.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+    const ch = data.choices?.[0];
+    if (!ch) throw new Error(data.error?.message || 'AI không trả lời.');
+    if (ch.finish_reason === 'length') throw new Error('Dàn ý quá dài, hãy chọn mức chi tiết thấp hơn.');
+    if (ch.finish_reason === 'content_filter') throw new Error('AI đã chặn yêu cầu này. Hãy diễn đạt chủ đề khác đi.');
+    return ch.message?.content || '';
+  },
+
+  /** Danh sách mô hình mà khóa này dùng được (cũng là cách kiểm tra khóa). */
+  async listModels(cfg) {
+    const skip = /embed|tts|whisper|dall-e|image|audio|realtime|transcri|moderation|guard|aqa|imagen|veo|sora|computer|ocr|search-preview/i;
+    let ids = [];
+    if (cfg.id === 'claude') {
+      const Anthropic = await this.sdk();
+      const client = new Anthropic({ apiKey: cfg.key, dangerouslyAllowBrowser: true });
+      try { for await (const m of client.models.list()) ids.push(m.id); }
+      catch (err) {
+        if (err instanceof Anthropic.AuthenticationError) throw new Error('Khóa API không hợp lệ.');
+        // Với khóa sai, máy chủ trả lỗi mà trình duyệt không đọc được nên trông như mất kết nối
+        if (err instanceof Anthropic.APIConnectionError) throw new Error('Không kiểm tra được khóa Claude — thường là do khóa sai. Hãy kiểm tra lại khóa và mạng.');
+        throw err;
+      }
+    } else if (cfg.id === 'gemini') {
+      const data = await httpJSON(cfg, 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', { headers: { 'x-goog-api-key': cfg.key } });
+      ids = (data.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace(/^models\//, ''));
+    } else {
+      // Danh sách mô hình của OpenRouter là công khai, nên phải kiểm tra khóa riêng
+      if (cfg.id === 'openrouter') await httpJSON(cfg, `${cfg.base}/key`, { headers: { Authorization: `Bearer ${cfg.key}` } });
+      const data = await httpJSON(cfg, `${cfg.base}/models`, { headers: { Authorization: `Bearer ${cfg.key}` } });
+      ids = (data.data || []).map(m => m.id);
+      if (cfg.id === 'openrouter') ids.sort((a, b) => (b.endsWith(':free') || b === 'openrouter/free') - (a.endsWith(':free') || a === 'openrouter/free'));
+    }
+    return ids.filter(id => !skip.test(id));
+  },
 };
-async function ensureAIKey(force = false) {
-  if (AI.key() && !force) return true;
-  const k = await modal({
-    title: 'Khóa API Claude',
-    body: `<p>Tính năng AI dùng khóa API Anthropic của bạn. Lấy khóa tại <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</p>
-      <p style="font-size:13px">Khóa chỉ được lưu trong trình duyệt này và chỉ gửi tới <b>api.anthropic.com</b>. Không nhập khóa trên máy dùng chung.</p>
-      <input class="field" type="password" style="width:100%" placeholder="sk-ant-…" value="${esc(AI.key())}" autocomplete="off">`,
-    actions: [
-      ...(AI.key() ? [{ label: 'Xóa khóa', value: '__clear' }] : []),
-      { label: 'Hủy', value: null }, { label: 'Lưu', primary: true, value: m => $('input', m).value.trim() },
-    ],
-    onOpen: m => $('input', m).focus(),
+/** fetch + JSON, đổi lỗi HTTP thành câu tiếng Việt dễ hiểu. */
+async function httpJSON(cfg, url, opts) {
+  let res;
+  try { res = await fetch(url, opts); }
+  catch { throw new Error(`Không kết nối được tới ${cfg.name}. Kiểm tra mạng.`); }
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (res.ok) return data;
+  const msg = data.error?.message || data.message || data.detail || res.statusText;
+  if (res.status === 401 || (res.status === 400 && /api.?key/i.test(msg))) throw new Error(`Khóa API ${cfg.name} không hợp lệ. Mở “Cài đặt AI” để nhập lại.`);
+  if (res.status === 402) throw new Error(`Tài khoản ${cfg.name} đã hết tiền / hết hạn mức. Hãy nạp thêm hoặc chọn dịch vụ khác.`);
+  if (res.status === 403) throw new Error(`Khóa ${cfg.name} không có quyền dùng mô hình này.`);
+  if (res.status === 404 || /model.*(not|does not) exist|not found/i.test(msg)) throw new Error(`Không có mô hình “${cfg.model}” trên ${cfg.name}. Mở “Cài đặt AI” để chọn mô hình khác.`);
+  if (res.status === 429) throw new Error(`${cfg.name} báo đã hết lượt dùng tạm thời. Đợi ít phút rồi thử lại, hoặc chọn dịch vụ khác.`);
+  throw new Error(`Lỗi từ ${cfg.name} (${res.status}): ${msg}`);
+}
+/** Bỏ phần suy nghĩ, khối code và lời dẫn mà một số mô hình hay thêm vào. */
+function cleanAIText(text) {
+  let t = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const fence = /```[a-z]*\n([\s\S]*?)```/i.exec(t);
+  if (fence) t = fence[1];
+  const lines = t.replace(/\r/g, '').split('\n');
+  while (lines.length > 1 && /[:：]\s*$/.test(lines[0].trim()) && !/^\s/.test(lines[1])) lines.shift();
+  return lines.join('\n').trim();
+}
+
+async function aiSettings() {
+  const c = AI.load();
+  let pick = c.provider;
+  const keys = { ...c.keys }, models = { ...c.models };
+  const res = await modal({
+    title: 'Cài đặt AI', wide: true,
+    body: `<p>Chọn dịch vụ AI và dán khóa API của bạn. Dịch vụ có nhãn <span class="free-tag">Miễn phí</span> cho dùng không mất tiền (có giới hạn số lượt).</p>
+      <div class="prov-grid">${Object.entries(PROVIDERS).map(([id, p]) => `
+        <button type="button" class="prov" data-prov="${id}"><b>${p.name}</b>${p.free ? '<span class="free-tag">Miễn phí</span>' : ''}<small>${esc(p.note)}</small></button>`).join('')}</div>
+      <div class="prov-form">
+        <label class="pn-label" for="ai-key">Khóa API <a id="ai-key-link" target="_blank" rel="noopener">Lấy khóa ↗</a></label>
+        <input class="field" id="ai-key" type="password" autocomplete="off" style="width:100%">
+        <label class="pn-label" for="ai-model" style="margin-top:12px">Mô hình
+          <button type="button" id="ai-load">Kiểm tra khóa & tải danh sách</button></label>
+        <input class="field" id="ai-model" list="ai-model-list" style="width:100%" spellcheck="false">
+        <datalist id="ai-model-list"></datalist>
+        <div id="ai-status" class="muted" style="font-size:13px;margin-top:8px;min-height:18px"></div>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">Khóa chỉ lưu trong trình duyệt này và chỉ gửi tới máy chủ của dịch vụ bạn chọn. Không nhập khóa trên máy dùng chung.</p>
+      </div>`,
+    actions: [{ label: 'Hủy', value: null }, { label: 'Lưu', primary: true, value: () => true }],
+    onOpen: m => {
+      const keyIn = $('#ai-key', m), modelIn = $('#ai-model', m), status = $('#ai-status', m), list = $('#ai-model-list', m);
+      const show = id => {
+        pick = id;
+        const p = PROVIDERS[id];
+        $$('.prov', m).forEach(b => b.classList.toggle('on', b.dataset.prov === id));
+        keyIn.value = keys[id] || ''; keyIn.placeholder = p.keyHint || 'Dán khóa API vào đây';
+        modelIn.value = models[id] || p.model; modelIn.placeholder = p.model;
+        $('#ai-key-link', m).href = p.keyUrl;
+        list.innerHTML = (p.models || [p.model]).map(x => `<option value="${esc(x)}">`).join('');
+        status.textContent = '';
+      };
+      keyIn.oninput = () => { keys[pick] = keyIn.value.trim(); };
+      modelIn.oninput = () => { models[pick] = modelIn.value.trim(); };
+      $$('.prov', m).forEach(b => b.onclick = () => show(b.dataset.prov));
+      $('#ai-load', m).onclick = async () => {
+        const cfg = { id: pick, ...PROVIDERS[pick], key: keys[pick] || '', model: models[pick] || PROVIDERS[pick].model };
+        if (!cfg.key) { status.textContent = 'Hãy dán khóa API trước.'; return; }
+        status.textContent = 'Đang kiểm tra…';
+        try {
+          const ids = await AI.listModels(cfg);
+          list.innerHTML = ids.map(id => `<option value="${esc(id)}">`).join('');
+          const ok = ids.includes(modelIn.value || cfg.model);
+          status.textContent = `✅ Khóa hợp lệ, có ${ids.length} mô hình. ` + (ok ? `Đang dùng “${modelIn.value || cfg.model}”.` : `⚠️ Không thấy “${modelIn.value || cfg.model}” — bấm vào ô Mô hình để chọn.`);
+          if (!ok) { modelIn.value = ''; modelIn.focus(); }
+        } catch (err) { status.textContent = '❌ ' + err.message; }
+      };
+      show(pick);
+    },
   });
-  if (k === '__clear') { AI.setKey(''); toast('Đã xóa khóa API'); return false; }
-  if (!k) return !!AI.key() && !force;
-  AI.setKey(k); return true;
+  if (!res) return false;
+  for (const k of Object.keys(keys)) if (!keys[k]) delete keys[k];
+  for (const k of Object.keys(models)) if (!models[k] || models[k] === PROVIDERS[k].model) delete models[k];
+  AI.save({ provider: pick, keys, models });
+  toast(`Đã chọn ${PROVIDERS[pick].name} · ${models[pick] || PROVIDERS[pick].model}`);
+  return !!keys[pick];
+}
+async function ensureAI() {
+  return AI.current().key ? true : aiSettings();
 }
 function busy(text) {
   const back = document.createElement('div');
@@ -1746,7 +1913,7 @@ function busy(text) {
   return () => back.remove();
 }
 async function aiCreateMap() {
-  if (!(await ensureAIKey())) return;
+  if (!(await ensureAI())) return;
   const r = await modal({
     title: 'Tạo sơ đồ bằng AI', wide: true,
     body: `<p>Mô tả chủ đề, bài học hoặc vấn đề bạn muốn vẽ sơ đồ.</p>
@@ -1756,13 +1923,14 @@ async function aiCreateMap() {
         <select id="ai-depth" class="field" style="width:auto">
           <option value="2">Ngắn gọn (2 cấp)</option><option value="3" selected>Vừa (3 cấp)</option><option value="4">Chi tiết (4 cấp)</option>
         </select>
-        <span style="flex:1"></span><button class="btn small" type="button" id="ai-key-btn">Đổi khóa API</button>
+        <span style="flex:1"></span><span class="muted" id="ai-using" style="font-size:13px"></span><button class="btn small" type="button" id="ai-key-btn">Cài đặt AI</button>
       </div>`,
     actions: [{ label: 'Hủy', value: null }, { label: 'Tạo sơ đồ', primary: true, value: m => ({ topic: $('#ai-topic', m).value.trim(), depth: +$('#ai-depth', m).value }) }],
-    onOpen: m => { $('#ai-topic', m).focus(); $('#ai-key-btn', m).onclick = () => ensureAIKey(true); },
+    onOpen: m => { $('#ai-topic', m).focus(); const using = () => { const c = AI.current(); $('#ai-using', m).textContent = `Dùng: ${c.name} · ${c.model}`; };
+      using(); $('#ai-key-btn', m).onclick = async () => { await aiSettings(); using(); }; },
   });
   if (!r?.topic) return;
-  const done = busy('AI đang soạn sơ đồ… (thường mất 10–40 giây)');
+  const done = busy(`${AI.current().name} đang soạn sơ đồ… (thường mất 10–40 giây)`);
   try {
     const text = await AI.outline(`Chủ đề: ${r.topic}\n\nHãy lập sơ đồ tư duy có ${r.depth} cấp bên dưới chủ đề trung tâm, khoảng 4–7 nhánh chính. Chủ đề trung tâm nên là một cụm từ ngắn.`);
     const root = outlineToRoot(text);
@@ -1775,7 +1943,7 @@ async function aiCreateMap() {
 async function aiExpand(id = S.sel) {
   if (!id) { toast('Hãy chọn một nút trước'); return; }
   if (S.editing) commitEdit();
-  if (!(await ensureAIKey())) return;
+  if (!(await ensureAI())) return;
   const n = getNode(id);
   const path = [];
   for (let cur = n; cur; cur = parentOf(cur.id)) path.unshift(cur.text.replace(/\n/g, ' '));
@@ -1947,6 +2115,7 @@ const ACTIONS = {
   'save-shared': saveShared,
   'ai-expand': () => aiExpand(),
   'ai-create': aiCreateMap,
+  'ai-settings': aiSettings,
   quiz: () => (S.quiz ? stopQuiz() : startQuiz()),
   'quiz-exit': stopQuiz,
   'quiz-all': () => quizAll(true),

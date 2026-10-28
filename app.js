@@ -443,6 +443,102 @@ function wrapText(text, font, maxW) {
   }
   return out;
 }
+/* ----- Công thức toán: chữ đặt giữa hai dấu $ được vẽ bằng MathJax (SVG) ----- */
+const MATH_RE = /\$(?!\s)([^$\n]+?)(?<!\s)\$/g;
+const hasMath = t => { MATH_RE.lastIndex = 0; return MATH_RE.test(t || ''); };
+const MJ = {
+  state: 'idle',
+  src: 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.min.js',
+  cache: new Map(),
+  load() {
+    if (this.state !== 'idle') return;
+    this.state = 'loading';
+    window.MathJax = { svg: { fontCache: 'none' }, startup: { typeset: false }, options: { enableMenu: false } };
+    loadScript(this.src).then(() => window.MathJax.startup.promise).then(() => {
+      this.state = 'ready';
+      if (S.map) render();
+    }).catch(err => { console.warn('Không tải được MathJax', err); this.state = 'failed'; });
+  },
+  /** Trả về { svg, w, h, d } với kích thước tính bằng px theo cỡ chữ fs. */
+  get(tex, fs) {
+    const key = fs + '|' + tex;
+    let m = this.cache.get(key);
+    if (m) return m;
+    const ex = fs * 0.5;
+    const node = window.MathJax.tex2svg(tex, { display: false, em: fs, ex });
+    const svg = node.querySelector('svg');
+    const w = parseFloat(svg.getAttribute('width')) * ex, h = parseFloat(svg.getAttribute('height')) * ex;
+    const d = -parseFloat(/vertical-align:\s*(-?[\d.]+)ex/.exec(svg.getAttribute('style') || '')?.[1] || 0) * ex;
+    svg.setAttribute('width', w.toFixed(2)); svg.setAttribute('height', h.toFixed(2));
+    svg.removeAttribute('style'); svg.removeAttribute('focusable'); svg.removeAttribute('role');
+    svg.querySelectorAll('title').forEach(t => t.remove());
+    m = { svg: svg.outerHTML, w, h, d };
+    if (this.cache.size > 2000) this.cache.clear();
+    this.cache.set(key, m);
+    return m;
+  },
+};
+/** Chia chữ có công thức thành các dòng (tự xuống dòng theo bề rộng tối đa). Trả về null nếu MathJax chưa sẵn sàng. */
+function mathLines(text, font, fs, lh, maxW) {
+  if (MJ.state !== 'ready') { MJ.load(); return null; }
+  const space = tw(' ', font), out = [];
+  for (const para of String(text).split('\n')) {
+    const tokens = [];
+    let last = 0;
+    MATH_RE.lastIndex = 0;
+    for (let m; (m = MATH_RE.exec(para));) {
+      para.slice(last, m.index).split(/(\s+)/).forEach(s => { if (s) tokens.push(/^\s+$/.test(s) ? { sp: true } : { t: 'text', s, w: tw(s, font) }); });
+      try { tokens.push({ t: 'math', tex: m[1], ...MJ.get(m[1], fs) }); }
+      catch { tokens.push({ t: 'text', s: m[0], w: tw(m[0], font) }); }
+      last = m.index + m[0].length;
+    }
+    para.slice(last).split(/(\s+)/).forEach(s => { if (s) tokens.push(/^\s+$/.test(s) ? { sp: true } : { t: 'text', s, w: tw(s, font) }); });
+    // xếp các mẩu vào dòng, giữ khoảng trắng giữa các mẩu
+    let line = [], w = 0, pendingSpace = false;
+    const flush = () => { out.push(line); line = []; w = 0; pendingSpace = false; };
+    for (const tk of tokens) {
+      if (tk.sp) { pendingSpace = line.length > 0; continue; }
+      const add = (pendingSpace ? space : 0) + tk.w;
+      if (line.length && w + add > maxW) flush();
+      tk.x = w + (line.length && pendingSpace ? space : 0);
+      w = tk.x + tk.w; line.push(tk); pendingSpace = false;
+    }
+    flush();
+  }
+  return out.map(segs => {
+    const A = Math.max(fs * 0.78, ...segs.filter(s => s.t === 'math').map(s => s.h - s.d));
+    const D = Math.max(fs * 0.24, ...segs.filter(s => s.t === 'math').map(s => s.d));
+    const h = Math.max(lh, Math.ceil(A + D + 6));
+    return { segs, w: segs.length ? segs[segs.length - 1].x + segs[segs.length - 1].w : 0, h, base: (h - A - D) / 2 + A, plain: segs.map(s => s.s ?? `$${s.tex}$`).join(' ') };
+  });
+}
+/** Nội dung SVG của khối chữ có công thức, gốc tọa độ ở góc trên-trái khối chữ. */
+function mathBlockSVG(b) {
+  const [, ital, weight] = /^(italic )?(\d+)/.exec(b.font);
+  const out = [];
+  let y = 0;
+  for (const l of b.mlines) {
+    for (const s of l.segs) {
+      if (s.t === 'math') out.push(s.svg.replace('<svg', `<svg x="${s.x.toFixed(2)}" y="${(y + l.base - (s.h - s.d)).toFixed(2)}"`).replace(/currentColor/g, b.text));
+      else out.push(`<text x="${s.x.toFixed(2)}" y="${(y + l.base).toFixed(2)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" xml:space="preserve">${esc(s.s)}</text>`);
+    }
+    y += l.h;
+  }
+  return out.join('');
+}
+const mathImgCache = new Map();
+function mathImage(svg, color) {
+  const key = color + svg;
+  let im = mathImgCache.get(key);
+  if (!im) {
+    im = new Image();
+    im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.replace(/currentColor/g, color));
+    if (mathImgCache.size > 1000) mathImgCache.clear();
+    mathImgCache.set(key, im);
+  }
+  return im;
+}
+
 const anchorY = b => (b.shape === 'underline' ? b.y + b.h - b.ul / 2 : b.y + b.h / 2);
 const radiusOf = b => ({ rounded: b.depth === 0 ? 16 : 10, rect: 3, pill: b.h / 2 }[b.shape] || 0);
 
@@ -474,8 +570,12 @@ function computeLayout(map) {
     const lh = Math.round(fs * 1.35);
     const [padX0, padT, padB] = boxed ? (depth === 0 ? [24, 14, 14] : depth === 1 ? [16, 9, 9] : [12, 6, 6]) : [4, 3, 7];
     const padX = shape === 'pill' ? padX0 + 6 : padX0;
-    const lines = wrapText(n.text || '', font, depth === 0 ? 300 : 240);
-    const textW = Math.ceil(Math.max(depth === 0 ? 40 : 16, ...lines.map(l => tw(l, font)))) + 2;
+    const maxW = depth === 0 ? 300 : 240;
+    // Khi đang sửa chữ thì hiện dạng thô để ô nhập khớp vị trí; còn lại vẽ công thức
+    const mlines = n.id !== S.editing && hasMath(n.text) ? mathLines(n.text, font, fs, lh, maxW) : null;
+    const lines = mlines ? mlines.map(l => l.plain) : wrapText(n.text || '', font, maxW);
+    const textW = Math.ceil(Math.max(depth === 0 ? 40 : 16, ...(mlines ? mlines.map(l => l.w) : lines.map(l => tw(l, font))))) + 2;
+    const textH = mlines ? mlines.reduce((a, l) => a + l.h, 0) : lines.length * lh;
     const iconW = n.icon ? Math.round(fs * 1.25) + 4 : 0;
     const nInd = (n.note ? 1 : 0) + (n.link ? 1 : 0);
     const indW = nInd ? nInd * 18 + 4 : 0;
@@ -487,10 +587,10 @@ function computeLayout(map) {
     const padL = padX + (innerW - contentW) / 2;
     const padTop = padT + (imgH ? imgH + 8 : 0);
     const w = Math.ceil(padX * 2 + innerW);
-    const h = Math.ceil(padTop + padB + Math.max(lines.length * lh, iconW ? fs * 1.3 : 0));
+    const h = Math.ceil(padTop + padB + Math.max(textH, iconW ? fs * 1.3 : 0));
     const b = {
       id: n.id, node: n, depth, x: 0, y: 0, w, h, color, fill, stroke, text, shape, fs, font, lh, lines,
-      padX, padL, padT: padTop, padB, textW, iconW, indW, dir: 1, kids: [],
+      padX, padL, padT: padTop, padB, textW, textH, mlines, iconW, indW, dir: 1, kids: [],
       imgX: padX + (innerW - imgW) / 2, imgY: padT, imgW, imgH,
       ew: depth === 1 ? 3.5 : depth === 2 ? 2.2 : 1.6, ul: depth <= 1 ? 3 : 2,
     };
@@ -638,7 +738,7 @@ function drawNodeCanvas(ctx, b) {
   if (b.shape === 'underline') { ctx.fillStyle = b.color; ctx.fillRect(b.x, b.y + b.h - b.ul, b.w, b.ul); }
   else if (b.stroke) { ctx.strokeStyle = b.stroke; ctx.lineWidth = 2; roundRectPath(ctx, b.x + 1, b.y + 1, b.w - 2, b.h - 2, Math.max(0, r - 1)); ctx.stroke(); }
   const innerH = b.h - b.padT - b.padB, midY = b.y + b.padT + innerH / 2;
-  const top = midY - (b.lines.length * b.lh) / 2;
+  const top = midY - b.textH / 2;
   let x = b.x + b.padL;
   const im = b.node.image && imageFor(b.node.image.src);
   if (im?.complete && im.naturalWidth) {
@@ -648,7 +748,18 @@ function drawNodeCanvas(ctx, b) {
   ctx.textBaseline = 'middle';
   if (b.node.icon) { ctx.font = `${b.fs}px ${EMOJI_FONT}`; ctx.fillStyle = b.text; ctx.fillText(b.node.icon, x, midY); x += b.iconW; }
   ctx.font = b.font; ctx.fillStyle = b.text;
-  b.lines.forEach((l, i) => ctx.fillText(l, x, top + b.lh * (i + 0.5)));
+  if (b.mlines) {
+    ctx.textBaseline = 'alphabetic';
+    let y = top;
+    for (const l of b.mlines) {
+      for (const sg of l.segs) {
+        if (sg.t === 'text') ctx.fillText(sg.s, x + sg.x, y + l.base);
+        else { const im = mathImage(sg.svg, b.text); if (im.complete && im.naturalWidth) ctx.drawImage(im, x + sg.x, y + l.base - (sg.h - sg.d), sg.w, sg.h); }
+      }
+      y += l.h;
+    }
+    ctx.textBaseline = 'middle';
+  } else b.lines.forEach((l, i) => ctx.fillText(l, x, top + b.lh * (i + 0.5)));
   if (b.indW) {
     ctx.font = `12px ${EMOJI_FONT}`;
     let ix = x + b.textW + 6;
@@ -667,12 +778,13 @@ function renderSVG(map) {
     if (b.fill !== 'transparent') o.push(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${r}" fill="${b.fill}"/>`);
     if (b.shape === 'underline') o.push(`<rect x="${b.x}" y="${b.y + b.h - b.ul}" width="${b.w}" height="${b.ul}" fill="${b.color}"/>`);
     else if (b.stroke) o.push(`<rect x="${b.x + 1}" y="${b.y + 1}" width="${b.w - 2}" height="${b.h - 2}" rx="${Math.max(0, r - 1)}" fill="none" stroke="${b.stroke}" stroke-width="2"/>`);
-    const midY = b.y + b.padT + (b.h - b.padT - b.padB) / 2, top = midY - (b.lines.length * b.lh) / 2;
+    const midY = b.y + b.padT + (b.h - b.padT - b.padB) / 2, top = midY - b.textH / 2;
     let x = b.x + b.padL;
     if (b.node.image) o.push(`<image href="${b.node.image.src}" x="${b.x + b.imgX}" y="${b.y + b.imgY}" width="${b.imgW}" height="${b.imgH}" preserveAspectRatio="none"/>`);
     const [, ital, weight] = /^(italic )?(\d+)/.exec(b.font);
     if (b.node.icon) { o.push(`<text x="${x}" y="${midY}" font-size="${b.fs}" dominant-baseline="central">${esc(b.node.icon)}</text>`); x += b.iconW; }
-    b.lines.forEach((l, i) => o.push(`<text x="${x}" y="${top + b.lh * (i + 0.5)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" dominant-baseline="central" xml:space="preserve">${esc(l)}</text>`));
+    if (b.mlines) o.push(`<g transform="translate(${x} ${top})">${mathBlockSVG(b)}</g>`);
+    else b.lines.forEach((l, i) => o.push(`<text x="${x}" y="${top + b.lh * (i + 0.5)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" dominant-baseline="central" xml:space="preserve">${esc(l)}</text>`));
     if (b.indW) o.push(`<text x="${x + b.textW + 6}" y="${midY}" font-size="12" dominant-baseline="central">${b.node.note ? '📝' : ''}${b.node.link ? '🔗' : ''}</text>`);
   }
   for (const r of map.relations || []) {
@@ -693,6 +805,11 @@ function imageFor(src) {
 function preloadImages(map) {
   const list = [];
   walk(map.root, n => { if (n.image) list.push(imageFor(n.image.src)); });
+  if (MJ.state === 'ready') {
+    for (const b of computeLayout(map).boxes.values()) {
+      b.mlines?.forEach(l => l.segs.forEach(sg => { if (sg.t === 'math') list.push(mathImage(sg.svg, b.text)); }));
+    }
+  }
   return Promise.all(list.map(im => (im.complete ? null : new Promise(r => { im.onload = im.onerror = r; }))));
 }
 const makeThumb = map => renderCanvas(map, { width: 400, height: 250, pad: 30 }).toDataURL('image/jpeg', 0.78);
@@ -795,7 +912,9 @@ function renderNodes(L, pf) {
     let inner = '';
     if (n.image) inner += `<img class="nimg" src="${n.image.src}" alt="" draggable="false" style="left:${b.imgX}px;top:${b.imgY}px;width:${b.imgW}px;height:${b.imgH}px">`;
     if (n.icon) inner += `<span class="ic" style="width:${b.iconW}px;font-size:${b.fs}px">${esc(n.icon)}</span>`;
-    inner += `<span class="tx">${esc(b.lines.join('\n'))}</span>`;
+    inner += b.mlines
+      ? `<svg class="tx" width="${b.textW}" height="${b.textH}" style="overflow:visible;font-family:${FONT}">${mathBlockSVG(b)}</svg>`
+      : `<span class="tx">${esc(b.lines.join('\n'))}</span>`;
     if (b.indW) {
       inner += '<span class="inds">' +
         (n.note ? `<span class="ind" data-act="ind-note" data-id="${b.id}" title="${esc(n.note)}">📝</span>` : '') +
@@ -1026,7 +1145,7 @@ function positionEditor(L) {
   if (!S.editing) { editorEl.hidden = true; return; }
   const b = L.boxes.get(S.editing);
   if (!b) { S.editing = null; editorEl.hidden = true; return; }
-  const innerH = b.h - b.padT - b.padB, th = b.lines.length * b.lh;
+  const innerH = b.h - b.padT - b.padB, th = b.textH;
   Object.assign(editorEl.style, {
     left: b.x + b.padL + b.iconW + 'px', top: b.y + b.padT + (innerH - th) / 2 + 'px',
     width: b.textW + 6 + 'px', height: th + 'px', font: b.font, lineHeight: b.lh + 'px', color: b.text, caretColor: b.text,
@@ -1367,7 +1486,8 @@ function nodePanel() {
     <button class="sq" data-act="font-dec" title="Nhỏ hơn">A−</button><span class="val">${b?.fs || ''}</span><button class="sq" data-act="font-inc" title="Lớn hơn">A+</button>
     <span style="flex:1"></span>
     <button class="sq ${bold ? 'on' : ''}" data-act="bold" title="Đậm (Ctrl+B)"><b>B</b></button>
-    <button class="sq ${st.italic ? 'on' : ''}" data-act="italic" title="Nghiêng (Ctrl+I)"><i>I</i></button></div></div>
+    <button class="sq ${st.italic ? 'on' : ''}" data-act="italic" title="Nghiêng (Ctrl+I)"><i>I</i></button></div>
+    <div class="muted" style="font-size:12px;margin-top:8px">Công thức: gõ giữa hai dấu $, ví dụ <code>$x^2+1$</code>, <code>$\\frac{a}{b}$</code>, <code>$\\sqrt{2}$</code>.</div></div>
   <div class="pn-sec"><div class="pn-label">Biểu tượng ${n.icon ? '<button data-act="set-icon" data-val="">Bỏ</button>' : ''}</div>
     <div class="emoji-grid">${EMOJIS.map(e => `<button class="${n.icon === e ? 'on' : ''}" data-act="set-icon" data-val="${e}">${e}</button>`).join('')}</div></div>
   <div class="pn-sec"><div class="pn-label">Hình ảnh</div>
@@ -1709,6 +1829,7 @@ Trả lời bằng một dàn ý dạng văn bản thụt lề:
 - Mỗi dòng là một ý ngắn gọn (thường không quá 8 từ), không dùng gạch đầu dòng, không đánh số, không Markdown.
 - Thụt đúng 2 dấu cách cho mỗi cấp.
 - Dòng đầu tiên, không thụt lề, là chủ đề trung tâm.
+Khi cần công thức toán, lý, hóa, viết bằng LaTeX đặt giữa hai dấu $, ví dụ $v = \\frac{s}{t}$, $x^2 + y^2 = r^2$; không dùng $ cho chữ thường.
 Viết bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ khác. Nội dung phải chính xác về kiến thức, phù hợp chương trình phổ thông khi chủ đề là bài học.`,
   schema: {
     type: 'object',
@@ -1912,12 +2033,71 @@ function busy(text) {
   $('#modal-root').appendChild(back);
   return () => back.remove();
 }
+/* ----- Đọc chữ từ tệp tài liệu (PDF, Word, văn bản) ngay trong trình duyệt ----- */
+const LIBS = {
+  pdf: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs',
+  pdfWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs',
+  mammoth: 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js',
+};
+const loadScript = src => new Promise((res, rej) => {
+  if ([...document.scripts].some(s => s.src === src)) return res();
+  const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Không tải được thư viện, kiểm tra mạng.'));
+  document.head.appendChild(s);
+});
+async function extractDocText(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.pdf') || file.type === 'application/pdf') {
+    const pdfjs = await import(LIBS.pdf);
+    pdfjs.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const tc = await (await pdf.getPage(i)).getTextContent();
+      let line = '', out = [];
+      for (const it of tc.items) { line += it.str; if (it.hasEOL) { out.push(line); line = ''; } }
+      if (line) out.push(line);
+      pages.push(out.join('\n'));
+    }
+    const text = pages.join('\n\n').trim();
+    if (!text) throw new Error('PDF này là ảnh chụp (không có chữ để đọc). Hãy dùng PDF có chữ, hoặc dán nội dung vào ô bên trên.');
+    return text;
+  }
+  if (name.endsWith('.docx')) {
+    await loadScript(LIBS.mammoth);
+    const r = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    return r.value.trim();
+  }
+  if (name.endsWith('.doc')) throw new Error('Tệp .doc (Word cũ) chưa hỗ trợ. Hãy lưu lại thành .docx hoặc PDF.');
+  return (await file.text()).trim();
+}
+
+const AI_DEPTH = {
+  2: 'có 2 cấp bên dưới chủ đề trung tâm, tổng cộng khoảng 15–25 ý',
+  3: 'có 3 cấp bên dưới chủ đề trung tâm, tổng cộng khoảng 30–45 ý',
+  4: 'có 4 cấp bên dưới chủ đề trung tâm, tổng cộng khoảng 50–70 ý',
+};
+const DOC_LIMIT = 120000;
+
 async function aiCreateMap() {
   if (!(await ensureAI())) return;
+  let mode = 'topic', docText = '', docName = '';
   const r = await modal({
     title: 'Tạo sơ đồ bằng AI', wide: true,
-    body: `<p>Mô tả chủ đề, bài học hoặc vấn đề bạn muốn vẽ sơ đồ.</p>
-      <textarea class="field" rows="4" id="ai-topic" placeholder="Ví dụ: Quang hợp ở thực vật – Sinh học 11, dùng để ôn tập trước kiểm tra"></textarea>
+    body: `<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
+        <button type="button" class="on" data-mode="topic">Từ chủ đề</button><button type="button" data-mode="doc">Từ tài liệu</button></div>
+      <div data-pane="topic">
+        <p>Mô tả chủ đề, bài học hoặc vấn đề bạn muốn vẽ sơ đồ.</p>
+        <textarea class="field" rows="4" id="ai-topic" placeholder="Ví dụ: Quang hợp ở thực vật – Sinh học 11, dùng để ôn tập trước kiểm tra"></textarea>
+      </div>
+      <div data-pane="doc" hidden>
+        <p>Dán nội dung bài học, hoặc chọn tệp <b>PDF, Word (.docx), .txt</b>. AI chỉ dùng thông tin có trong tài liệu.</p>
+        <textarea class="field" rows="7" id="ai-doc" placeholder="Dán nội dung tài liệu vào đây…"></textarea>
+        <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+          <label class="btn small" style="cursor:pointer">${icon('upload')} Chọn tệp…<input type="file" id="ai-file" accept=".pdf,.docx,.txt,.md,text/plain,application/pdf" hidden></label>
+          <span id="ai-doc-info" class="muted" style="font-size:13px"></span>
+        </div>
+        <input class="field" id="ai-focus" style="width:100%;margin-top:10px" placeholder="Yêu cầu thêm (không bắt buộc), ví dụ: chỉ tập trung vào phần II, dùng để ôn thi">
+      </div>
       <div class="row" style="margin-top:12px;gap:10px;flex-wrap:wrap">
         <label class="muted" for="ai-depth">Mức chi tiết</label>
         <select id="ai-depth" class="field" style="width:auto">
@@ -1925,14 +2105,57 @@ async function aiCreateMap() {
         </select>
         <span style="flex:1"></span><span class="muted" id="ai-using" style="font-size:13px"></span><button class="btn small" type="button" id="ai-key-btn">Cài đặt AI</button>
       </div>`,
-    actions: [{ label: 'Hủy', value: null }, { label: 'Tạo sơ đồ', primary: true, value: m => ({ topic: $('#ai-topic', m).value.trim(), depth: +$('#ai-depth', m).value }) }],
-    onOpen: m => { $('#ai-topic', m).focus(); const using = () => { const c = AI.current(); $('#ai-using', m).textContent = `Dùng: ${c.name} · ${c.model}`; };
-      using(); $('#ai-key-btn', m).onclick = async () => { await aiSettings(); using(); }; },
+    actions: [{ label: 'Hủy', value: null }, {
+      label: 'Tạo sơ đồ', primary: true,
+      value: m => ({ mode, topic: $('#ai-topic', m).value.trim(), doc: $('#ai-doc', m).value.trim(), focus: $('#ai-focus', m).value.trim(), depth: +$('#ai-depth', m).value }),
+    }],
+    onOpen: m => {
+      $('#ai-topic', m).focus();
+      const using = () => { const c = AI.current(); $('#ai-using', m).textContent = `Dùng: ${c.name} · ${c.model}`; };
+      using(); $('#ai-key-btn', m).onclick = async () => { await aiSettings(); using(); };
+      $$('[data-mode]', m).forEach(b => b.onclick = () => {
+        mode = b.dataset.mode;
+        $$('[data-mode]', m).forEach(x => x.classList.toggle('on', x === b));
+        $$('[data-pane]', m).forEach(p => { p.hidden = p.dataset.pane !== mode; });
+        $(mode === 'topic' ? '#ai-topic' : '#ai-doc', m).focus();
+      });
+      const info = $('#ai-doc-info', m), docIn = $('#ai-doc', m);
+      const showInfo = () => { const n = docIn.value.trim().length; info.textContent = n ? `${docName ? docName + ' · ' : ''}${n.toLocaleString('vi-VN')} ký tự` : ''; };
+      docIn.oninput = () => { docName = ''; showInfo(); };
+      $('#ai-file', m).onchange = async e => {
+        const f = e.target.files[0]; e.target.value = '';
+        if (!f) return;
+        info.textContent = `Đang đọc ${f.name}…`;
+        try { docIn.value = await extractDocText(f); docName = f.name; showInfo(); }
+        catch (err) { console.error(err); info.textContent = '❌ ' + (err.message || 'Không đọc được tệp này'); }
+      };
+    },
   });
-  if (!r?.topic) return;
+  if (!r) return;
+  let prompt;
+  if (r.mode === 'doc') {
+    if (!r.doc) { toast('Hãy dán nội dung hoặc chọn tệp tài liệu'); return; }
+    let doc = r.doc;
+    if (doc.length > DOC_LIMIT) {
+      const ok = await modal({
+        title: 'Tài liệu quá dài',
+        body: `<p>Tài liệu có ${doc.length.toLocaleString('vi-VN')} ký tự. AI chỉ đọc được khoảng ${DOC_LIMIT.toLocaleString('vi-VN')} ký tự đầu (≈ ${Math.round(DOC_LIMIT / doc.length * 100)}% tài liệu).</p><p>Bạn có thể bấm Hủy và chỉ dán phần cần làm sơ đồ.</p>`,
+        actions: [{ label: 'Hủy', value: false }, { label: 'Dùng phần đầu', primary: true, value: true }],
+      });
+      if (!ok) return;
+      doc = doc.slice(0, DOC_LIMIT);
+    }
+    prompt = `Dưới đây là một tài liệu học tập.\n\n<tai_lieu>\n${doc}\n</tai_lieu>\n\n` +
+      `Hãy lập sơ đồ tư duy tóm tắt tài liệu trên, ${AI_DEPTH[r.depth]} (ít hơn nếu tài liệu ngắn — không bịa thêm ý cho đủ số), thường 3–7 nhánh chính. ` +
+      `Chỉ dùng thông tin có trong tài liệu, không thêm kiến thức bên ngoài. Giữ đúng thuật ngữ, số liệu, công thức của tài liệu. ` +
+      `Chủ đề trung tâm là tên bài/chủ đề chính của tài liệu, viết ngắn gọn.` + (r.focus ? `\nYêu cầu thêm của người dùng: ${r.focus}` : '');
+  } else {
+    if (!r.topic) { toast('Hãy nhập chủ đề'); return; }
+    prompt = `Chủ đề: ${r.topic}\n\nHãy lập sơ đồ tư duy ${AI_DEPTH[r.depth]}, khoảng 4–7 nhánh chính. Chủ đề trung tâm nên là một cụm từ ngắn.`;
+  }
   const done = busy(`${AI.current().name} đang soạn sơ đồ… (thường mất 10–40 giây)`);
   try {
-    const text = await AI.outline(`Chủ đề: ${r.topic}\n\nHãy lập sơ đồ tư duy có ${r.depth} cấp bên dưới chủ đề trung tâm, khoảng 4–7 nhánh chính. Chủ đề trung tâm nên là một cụm từ ngắn.`);
+    const text = await AI.outline(prompt);
     const root = outlineToRoot(text);
     if (!root) throw new Error('Không đọc được dàn ý AI trả về.');
     assignSides(root);
@@ -2116,6 +2339,7 @@ const ACTIONS = {
   'ai-expand': () => aiExpand(),
   'ai-create': aiCreateMap,
   'ai-settings': aiSettings,
+  'install-app': installApp,
   quiz: () => (S.quiz ? stopQuiz() : startQuiz()),
   'quiz-exit': stopQuiz,
   'quiz-all': () => quizAll(true),
@@ -2156,6 +2380,7 @@ function showHelp() {
     ['<kbd>Ctrl</kbd>+<kbd>B</kbd> / <kbd>I</kbd>', 'Chữ đậm / nghiêng'], ['<kbd>Ctrl</kbd>+<kbd>F</kbd>', 'Tìm kiếm'],
     ['<kbd>Ctrl</kbd>+cuộn chuột, <kbd>Ctrl</kbd>+<kbd>=</kbd>/<kbd>−</kbd>', 'Phóng to / thu nhỏ'], ['<kbd>Ctrl</kbd>+<kbd>0</kbd>', 'Vừa màn hình'],
     ['Kéo khoảng trống / cuộn chuột', 'Di chuyển vùng vẽ'], ['Kéo một nút', 'Đổi vị trí: thả giữa nút → làm nút con; thả mép trên/dưới → chèn trước/sau'],
+    ['<code>$x^2$</code>, <code>$\\frac{a}{b}$</code>', 'Công thức toán: gõ LaTeX giữa hai dấu $ (ví dụ $\\sqrt{x}$, $H_2O$, $\\Delta = b^2 - 4ac$)'],
     ['<kbd>Home</kbd>', 'Chọn chủ đề trung tâm'], ['<kbd>Esc</kbd>', 'Bỏ chọn / hủy'],
   ];
   modal({ title: 'Phím tắt & thao tác', wide: true, body: `<table class="keys">${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</table>` });
@@ -2303,6 +2528,29 @@ $('#map-title').addEventListener('blur', e => { if (!e.target.value.trim()) { S.
 window.addEventListener('hashchange', route);
 window.addEventListener('beforeunload', () => { if (S.map) saveNow(true); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && S.map) saveNow(true); });
+
+/* ---------------- Cài như ứng dụng (PWA) & dùng khi mất mạng ---------------- */
+let installPrompt = null;
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(err => console.warn('Không đăng ký được service worker', err));
+}
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); installPrompt = e;
+  $('[data-act="install-app"]').hidden = false;
+});
+window.addEventListener('appinstalled', () => { installPrompt = null; $('[data-act="install-app"]').hidden = true; toast('Đã cài Sodo'); });
+async function installApp() {
+  if (!installPrompt) {
+    modal({ title: 'Cài Sodo như ứng dụng', body: `<p><b>iPhone / iPad (Safari):</b> bấm nút Chia sẻ <span style="font-size:16px">⎋</span> → “Thêm vào MH chính”.</p>
+      <p><b>Android (Chrome):</b> bấm ⋮ → “Cài đặt ứng dụng” hoặc “Thêm vào màn hình chính”.</p>
+      <p><b>Máy tính (Chrome / Edge):</b> bấm biểu tượng cài đặt ở cuối thanh địa chỉ.</p>` });
+    return;
+  }
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null; $('[data-act="install-app"]').hidden = true;
+}
+window.addEventListener('offline', () => toast('Mất kết nối mạng — vẫn vẽ sơ đồ bình thường, riêng AI và chia sẻ cần mạng.', 4000));
 
 /* ---------------- Khởi động ---------------- */
 (async function boot() {

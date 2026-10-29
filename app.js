@@ -1924,7 +1924,7 @@ async function importAttachments(att) {
    Mỗi sơ đồ là một tệp .sodo.json; ai sửa sau thì thắng, nếu cả hai máy cùng
    sửa từ lần đồng bộ trước thì giữ cả hai bản.
    ===================================================================== */
-const GDRIVE_CLIENT_ID = '';
+const GDRIVE_CLIENT_ID = '438577907252-ioehqa9bqcfdingjiaf0hj4mnv3mpscd.apps.googleusercontent.com';
 const Drive = {
   api: 'https://www.googleapis.com/drive/v3',
   upload: 'https://www.googleapis.com/upload/drive/v3',

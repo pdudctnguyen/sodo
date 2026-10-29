@@ -40,6 +40,7 @@ const ICONS = {
   quiz: '<path d="M3 3l18 18"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-2.6 3.2M6.6 6.6C4.2 8.2 3 12 3 12s4 6 9 6c1.5 0 2.9-.4 4.1-1.1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
   reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  check: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.5h6V4"/><path d="m9 13 2 2 4-4"/>',
 };
 const icon = n => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
 function hydrateIcons(root = document) {
@@ -2367,22 +2368,30 @@ Trả lời bằng một dàn ý dạng văn bản thụt lề:
 - Dòng đầu tiên, không thụt lề, là chủ đề trung tâm.
 Khi cần công thức toán, lý, hóa, viết bằng LaTeX đặt giữa hai dấu $, ví dụ $v = \\frac{s}{t}$, $x^2 + y^2 = r^2$; không dùng $ cho chữ thường.
 Viết bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ khác. Nội dung phải chính xác về kiến thức, phù hợp chương trình phổ thông khi chủ đề là bài học.`,
-  schema: {
-    type: 'object',
-    properties: { outline: { type: 'string', description: 'Dàn ý thụt lề, mỗi cấp 2 dấu cách' } },
-    required: ['outline'], additionalProperties: false,
+  get outlineSpec() {
+    return {
+      system: this.system,
+      schema: { type: 'object', properties: { outline: { type: 'string', description: 'Dàn ý thụt lề, mỗi cấp 2 dấu cách' } }, required: ['outline'], additionalProperties: false },
+      gschema: { type: 'OBJECT', properties: { outline: { type: 'STRING' } }, required: ['outline'] },
+      plain: 'Chỉ trả về đúng dàn ý, không có lời dẫn hay lời kết, không đặt trong khối code.',
+      tooLong: 'Dàn ý quá dài, hãy chọn mức chi tiết thấp hơn.',
+    };
   },
-
+  /** Gọi dịch vụ AI đang chọn; trả về chữ thô (JSON theo spec.schema, hoặc văn bản với dịch vụ không hỗ trợ schema). */
+  ask(prompt, spec, cfg = this.current()) {
+    return cfg.id === 'claude' ? this.claude(prompt, cfg, spec)
+      : cfg.id === 'gemini' ? this.gemini(prompt, cfg, spec)
+      : this.openaiCompat(prompt, cfg, spec);
+  },
   /** Gọi AI và trả về dàn ý dạng văn bản thụt lề. */
   async outline(prompt, cfg = this.current()) {
-    const text = cfg.id === 'claude' ? await this.claude(prompt, cfg)
-      : cfg.id === 'gemini' ? await this.gemini(prompt, cfg)
-      : await this.openaiCompat(prompt, cfg);
+    let text = await this.ask(prompt, this.outlineSpec, cfg);
+    try { const o = JSON.parse(text); if (typeof o?.outline === 'string') text = o.outline; } catch {}
     const outline = cleanAIText(text);
     if (!outline.trim()) throw new Error('AI không trả về dàn ý.');
     return outline;
   },
-  async claude(prompt, cfg) {
+  async claude(prompt, cfg, spec) {
     const Anthropic = await this.sdk();
     const client = new Anthropic({ apiKey: cfg.key, dangerouslyAllowBrowser: true });
     try {
@@ -2391,14 +2400,13 @@ Viết bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ kh
         max_tokens: 16000,
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
-        output_config: { effort: 'medium', format: { type: 'json_schema', schema: this.schema } },
-        system: this.system,
+        output_config: { effort: 'medium', format: { type: 'json_schema', schema: spec.schema } },
+        system: spec.system,
         messages: [{ role: 'user', content: prompt }],
       });
       if (res.stop_reason === 'refusal') throw new Error('AI đã từ chối yêu cầu này. Hãy thử diễn đạt chủ đề khác đi.');
-      if (res.stop_reason === 'max_tokens') throw new Error('Dàn ý quá dài, hãy chọn mức chi tiết thấp hơn.');
-      const text = res.content.find(b => b.type === 'text')?.text;
-      return (text && JSON.parse(text).outline) || '';
+      if (res.stop_reason === 'max_tokens') throw new Error(spec.tooLong);
+      return res.content.find(b => b.type === 'text')?.text || '';
     } catch (err) {
       if (err instanceof Anthropic.AuthenticationError) throw new Error('Khóa API Claude không hợp lệ. Mở “Cài đặt AI” để nhập lại.');
       if (err instanceof Anthropic.PermissionDeniedError) throw new Error('Khóa API không có quyền dùng mô hình này.');
@@ -2409,27 +2417,26 @@ Viết bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ kh
       throw err;
     }
   },
-  async gemini(prompt, cfg) {
+  async gemini(prompt, cfg, spec) {
     const data = await httpJSON(cfg, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
       method: 'POST',
       headers: { 'x-goog-api-key': cfg.key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: this.system }] },
+        systemInstruction: { parts: [{ text: spec.system }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema: { type: 'OBJECT', properties: { outline: { type: 'STRING' } }, required: ['outline'] },
+          responseSchema: spec.gschema,
         },
       }),
     });
     const cand = data.candidates?.[0];
     if (!cand) throw new Error(data.promptFeedback?.blockReason ? 'Gemini đã chặn yêu cầu này. Hãy diễn đạt chủ đề khác đi.' : 'Gemini không trả lời.');
-    if (cand.finishReason === 'MAX_TOKENS') throw new Error('Dàn ý quá dài, hãy chọn mức chi tiết thấp hơn.');
+    if (cand.finishReason === 'MAX_TOKENS') throw new Error(spec.tooLong);
     if (['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST'].includes(cand.finishReason)) throw new Error('Gemini đã chặn yêu cầu này. Hãy diễn đạt chủ đề khác đi.');
-    const text = (cand.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
-    try { return JSON.parse(text).outline || ''; } catch { return text; }
+    return (cand.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
   },
-  async openaiCompat(prompt, cfg) {
+  async openaiCompat(prompt, cfg, spec) {
     const headers = { Authorization: `Bearer ${cfg.key}`, 'Content-Type': 'application/json' };
     if (cfg.id === 'openrouter') { headers['X-Title'] = 'Sodo'; headers['HTTP-Referer'] = location.origin; }
     const data = await httpJSON(cfg, `${cfg.base}/chat/completions`, {
@@ -2437,14 +2444,14 @@ Viết bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ kh
       body: JSON.stringify({
         model: cfg.model,
         messages: [
-          { role: 'system', content: this.system + '\nChỉ trả về đúng dàn ý, không có lời dẫn hay lời kết, không đặt trong khối code.' },
+          { role: 'system', content: spec.system + '\n' + spec.plain },
           { role: 'user', content: prompt },
         ],
       }),
     });
     const ch = data.choices?.[0];
     if (!ch) throw new Error(data.error?.message || 'AI không trả lời.');
-    if (ch.finish_reason === 'length') throw new Error('Dàn ý quá dài, hãy chọn mức chi tiết thấp hơn.');
+    if (ch.finish_reason === 'length') throw new Error(spec.tooLong);
     if (ch.finish_reason === 'content_filter') throw new Error('AI đã chặn yêu cầu này. Hãy diễn đạt chủ đề khác đi.');
     return ch.message?.content || '';
   },
@@ -2727,6 +2734,275 @@ async function aiExpand(id = S.sel) {
 }
 
 /* =====================================================================
+   CÂU HỎI ÔN TẬP — AI soạn từ nội dung sơ đồ; học sinh làm bài, chấm điểm, in đề.
+   Bộ câu hỏi lưu trong sơ đồ (map.quiz) nên đi kèm khi đồng bộ, xuất tệp và chia sẻ link.
+   ===================================================================== */
+const QUIZ_SPEC = {
+  system: `Bạn là giáo viên Việt Nam giỏi ra đề kiểm tra. Bạn soạn câu hỏi ôn tập từ nội dung một sơ đồ tư duy.
+Kiến thức phải chính xác, câu hỏi rõ ràng, một nghĩa, phù hợp học sinh phổ thông. Viết bằng tiếng Việt, trừ khi nội dung thuộc môn ngoại ngữ.
+Khi cần công thức toán, lý, hóa, viết bằng LaTeX đặt giữa hai dấu $, ví dụ $x^2 + y^2 = r^2$.`,
+  schema: {
+    type: 'object', additionalProperties: false, required: ['questions'],
+    properties: {
+      questions: {
+        type: 'array',
+        items: {
+          type: 'object', additionalProperties: false, required: ['question', 'options', 'correct', 'answer', 'explain'],
+          properties: {
+            question: { type: 'string' },
+            options: { type: 'array', items: { type: 'string' }, description: '4 phương án với câu trắc nghiệm; [] với câu tự luận' },
+            correct: { type: 'integer', description: 'Chỉ số phương án đúng (0–3); -1 với câu tự luận' },
+            answer: { type: 'string', description: 'Đáp án (mẫu) ngắn gọn' },
+            explain: { type: 'string', description: 'Giải thích 1–2 câu' },
+          },
+        },
+      },
+    },
+  },
+  gschema: {
+    type: 'OBJECT', required: ['questions'],
+    properties: {
+      questions: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT', required: ['question', 'options', 'correct', 'answer', 'explain'],
+          properties: { question: { type: 'STRING' }, options: { type: 'ARRAY', items: { type: 'STRING' } }, correct: { type: 'INTEGER' }, answer: { type: 'STRING' }, explain: { type: 'STRING' } },
+        },
+      },
+    },
+  },
+  plain: 'Chỉ trả về một đối tượng JSON hợp lệ dạng {"questions":[{"question":"…","options":["…"],"correct":0,"answer":"…","explain":"…"}]}, không có lời dẫn, không đặt trong khối code.',
+  tooLong: 'Bộ câu hỏi quá dài, hãy chọn ít câu hơn.',
+};
+/** Đọc JSON từ câu trả lời AI (bỏ khối code, lời dẫn) và giữ lại các câu hỏi hợp lệ. */
+function parseQuiz(text) {
+  let t = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const fence = /```[a-z]*\n([\s\S]*?)```/i.exec(t);
+  if (fence) t = fence[1];
+  let o;
+  try { o = JSON.parse(t); } catch {
+    const a = t.indexOf('{'), b = t.lastIndexOf('}');
+    try { o = JSON.parse(t.slice(a, b + 1)); } catch { throw new Error('AI trả về sai định dạng. Hãy thử lại hoặc chọn dịch vụ AI khác.'); }
+  }
+  const list = Array.isArray(o) ? o : o?.questions || [];
+  return list.map(q => {
+    const options = Array.isArray(q.options) ? q.options.map(x => String(x).trim()).filter(Boolean) : [];
+    // Một số mô hình ghi đáp án là "1" hoặc "B" thay vì số
+    const c = String(q.correct ?? '').trim();
+    const correct = /^\d+$/.test(c) ? +c : c.length === 1 ? LETTERS.indexOf(c.toUpperCase()) : -1;
+    const mcq = options.length >= 2 && correct >= 0 && correct < options.length;
+    return {
+      q: String(q.question || '').trim(), options: mcq ? options : [], correct: mcq ? correct : -1,
+      answer: String(q.answer || (mcq ? options[correct] : '')).trim(), explain: String(q.explain || '').trim(),
+    };
+  }).filter(q => q.q && (q.options.length || q.answer));
+}
+/** Chữ có công thức $…$ → HTML (công thức vẽ bằng MathJax nếu đã sẵn sàng). */
+function richText(str) {
+  const s = String(str || '');
+  let out = '', last = 0;
+  MATH_RE.lastIndex = 0;
+  for (let m; (m = MATH_RE.exec(s));) {
+    out += esc(s.slice(last, m.index));
+    let html = null;
+    if (MJ.state === 'ready') { try { html = `<span class="qz-math">${MJ.get(m[1], 16).svg}</span>`; } catch {} }
+    out += html || esc(m[0]);
+    last = m.index + m[0].length;
+  }
+  return out + esc(s.slice(last));
+}
+async function mathReady(texts) {
+  if (!texts.some(t => hasMath(t))) return;
+  MJ.load();
+  for (let i = 0; i < 60 && MJ.state === 'loading'; i++) await new Promise(r => setTimeout(r, 100));
+}
+const LETTERS = 'ABCDEFGH';
+
+async function questionsAction() {
+  if (S.editing) commitEdit();
+  if (S.map.quiz?.questions?.length) return quizPlayer();
+  if (S.temp) { toast('Sơ đồ này chưa có bộ câu hỏi'); return; }
+  return quizSetup();
+}
+async function quizSetup() {
+  if (!(await ensureAI())) return;
+  const sel = S.sel && !isRoot(S.sel) ? getNode(S.sel) : null;
+  let kind = 'mcq';
+  const r = await modal({
+    title: 'AI soạn câu hỏi ôn tập', wide: true,
+    body: `<p>AI đọc nội dung sơ đồ (kể cả ghi chú) và soạn câu hỏi. Học sinh làm bài ngay trong Sodo, được chấm điểm; bạn cũng có thể in đề kèm đáp án.</p>
+      ${sel ? `<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
+        <button type="button" class="on" data-scope="all">Cả sơ đồ</button><button type="button" data-scope="sel">Nhánh “${esc(sel.text.slice(0, 30))}”</button></div>` : ''}
+      <div class="seg" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">
+        <button type="button" class="on" data-kind="mcq">Trắc nghiệm</button><button type="button" data-kind="short">Tự luận ngắn</button><button type="button" data-kind="mix">Cả hai</button></div>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <label class="muted" for="qz-n">Số câu</label>
+        <select id="qz-n" class="field" style="width:auto"><option>5</option><option selected>10</option><option>15</option><option>20</option></select>
+        <label class="muted" for="qz-lv">Mức độ</label>
+        <select id="qz-lv" class="field" style="width:auto">
+          <option value="Nhận biết và thông hiểu">Nhận biết – thông hiểu</option>
+          <option value="Trộn đủ các mức nhận biết, thông hiểu, vận dụng" selected>Trộn các mức</option>
+          <option value="Chủ yếu vận dụng và vận dụng cao, cần suy luận, không hỏi thuộc lòng">Vận dụng – vận dụng cao</option>
+        </select>
+      </div>
+      <input class="field" id="qz-focus" style="width:100%;margin-top:12px" placeholder="Yêu cầu thêm (không bắt buộc), ví dụ: dành cho học sinh lớp 7, tránh câu hỏi tính toán">
+      <div class="row" style="margin-top:12px;gap:10px"><span style="flex:1"></span><span class="muted" id="ai-using" style="font-size:13px"></span><button class="btn small" type="button" id="ai-key-btn">Cài đặt AI</button></div>`,
+    actions: [{ label: 'Hủy', value: null }, {
+      label: 'Soạn câu hỏi', primary: true,
+      value: m => ({ scope: $('[data-scope].on', m)?.dataset.scope || 'all', kind, n: +$('#qz-n', m).value, level: $('#qz-lv', m).value, focus: $('#qz-focus', m).value.trim() }),
+    }],
+    onOpen: m => {
+      const using = () => { const c = AI.current(); $('#ai-using', m).textContent = `Dùng: ${c.name} · ${c.model}`; };
+      using(); $('#ai-key-btn', m).onclick = async () => { await aiSettings(); using(); };
+      $$('[data-scope]', m).forEach(b => b.onclick = () => $$('[data-scope]', m).forEach(x => x.classList.toggle('on', x === b)));
+      $$('[data-kind]', m).forEach(b => b.onclick = () => { kind = b.dataset.kind; $$('[data-kind]', m).forEach(x => x.classList.toggle('on', x === b)); });
+    },
+  });
+  if (!r) return;
+  const node = r.scope === 'sel' && sel ? sel : S.map.root;
+  const content = toMarkdown(node).slice(0, 60000);
+  const kinds = {
+    mcq: 'tất cả là câu trắc nghiệm',
+    short: 'tất cả là câu tự luận ngắn (trả lời trong 1–3 câu)',
+    mix: 'khoảng 2/3 trắc nghiệm, 1/3 tự luận ngắn',
+  };
+  const done = busy(`AI đang soạn ${r.n} câu hỏi…`);
+  try {
+    const raw = await AI.ask(`Nội dung sơ đồ tư duy (dạng Markdown, dòng bắt đầu bằng > là ghi chú):
+"""
+${content}
+"""
+
+Soạn đúng ${r.n} câu hỏi ôn tập dựa trên nội dung trên.
+- Loại câu: ${kinds[r.kind]}.
+- Mức độ: ${r.level}.
+- Câu trắc nghiệm: đúng 4 phương án trong "options", chỉ 1 phương án đúng, "correct" là chỉ số 0–3 của phương án đúng; phương án nhiễu phải hợp lý; vị trí đáp án đúng thay đổi giữa các câu; không dùng "Tất cả đều đúng" hay "Cả A và B". "answer" nhắc lại phương án đúng.
+- Câu tự luận ngắn: "options" là [], "correct" là -1, "answer" là đáp án mẫu ngắn gọn.
+- "explain": giải thích 1–2 câu vì sao đáp án đúng.
+- Chỉ hỏi kiến thức có trong nội dung trên (được dùng kiến thức phổ thông chuẩn để tạo phương án nhiễu); không hỏi về cách trình bày sơ đồ; các câu không trùng ý nhau.${r.focus ? `\n- Yêu cầu thêm: ${r.focus}` : ''}`, QUIZ_SPEC);
+    const questions = parseQuiz(raw);
+    if (!questions.length) throw new Error('AI không soạn được câu hỏi nào. Hãy thử lại.');
+    done();
+    S.map.quiz = { questions, scope: node === S.map.root ? '' : node.text, createdAt: Date.now() };
+    scheduleSave();
+    quizPlayer();
+  } catch (err) { done(); console.error(err); toast(err.message || 'Có lỗi khi gọi AI', 4500); }
+}
+async function quizPlayer() {
+  const quiz = S.map.quiz;
+  await mathReady(quiz.questions.flatMap(q => [q.q, q.answer, q.explain, ...q.options]));
+  // Mỗi lượt làm bài xáo thứ tự phương án để không học vẹt vị trí đáp án
+  let order = [];
+  const shuffle = () => {
+    order = quiz.questions.map(q => {
+      const idx = q.options.map((_, i) => i);
+      for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+      return idx;
+    });
+  };
+  shuffle();
+  const nMcq = quiz.questions.filter(q => q.options.length).length;
+  const listHTML = () => quiz.questions.map((q, i) => `<li class="qz-q" data-i="${i}">
+      <div class="qz-text"><b>Câu ${i + 1}.</b> ${richText(q.q)}</div>
+      ${q.options.length
+        ? `<div class="qz-opts">${order[i].map((o, k) => `<button type="button" class="qz-opt" data-o="${o}"><b>${LETTERS[k]}</b><span>${richText(q.options[o])}</span></button>`).join('')}</div>`
+        : `<textarea class="field qz-write" rows="2" placeholder="Viết câu trả lời của em…"></textarea>`}
+      <div class="qz-ans" hidden><b>Đáp án:</b> ${richText(q.options.length ? `${LETTERS[order[i].indexOf(q.correct)]}. ${q.options[q.correct]}` : q.answer)}${q.explain ? `<div class="muted">${richText(q.explain)}</div>` : ''}</div>
+    </li>`).join('');
+  let next = null;
+  await modal({
+    title: `Câu hỏi ôn tập${quiz.scope ? ` — ${quiz.scope}` : ''}`, wide: true,
+    body: `<div class="qz">
+        <div class="qz-score" hidden></div>
+        <ol class="qz-list"></ol>
+        <div class="row qz-tools">
+          <button type="button" class="btn primary" data-qz="submit">Nộp bài</button>
+          <button type="button" class="btn" data-qz="retry" hidden>Làm lại</button>
+          <span style="flex:1"></span>
+          <button type="button" class="btn small" data-qz="print">${icon('download')} In đề / đáp án</button>
+          ${S.temp ? '' : `<button type="button" class="btn small" data-qz="new">${icon('sparkle')} Soạn bộ mới</button><button type="button" class="btn small" data-qz="del" title="Xóa bộ câu hỏi khỏi sơ đồ">${icon('trash')}</button>`}
+        </div>
+      </div>`,
+    actions: [{ label: 'Đóng', value: null }],
+    onOpen: m => {
+      m.querySelector('.modal').style.width = 'min(760px,100%)';
+      const list = $('.qz-list', m), score = $('.qz-score', m);
+      const fill = () => { list.innerHTML = listHTML(); score.hidden = true; $('[data-qz="submit"]', m).hidden = false; $('[data-qz="retry"]', m).hidden = true; };
+      fill();
+      list.addEventListener('click', e => {
+        const b = e.target.closest('.qz-opt');
+        if (!b || list.classList.contains('done')) return;
+        $$('.qz-opt', b.parentElement).forEach(x => x.classList.toggle('on', x === b));
+      });
+      const close = () => $('.foot button', m).click();
+      m.addEventListener('click', async e => {
+        const act = e.target.closest('[data-qz]')?.dataset.qz;
+        if (act === 'submit') {
+          let right = 0, blank = 0;
+          $$('.qz-q', list).forEach(li => {
+            const q = quiz.questions[+li.dataset.i];
+            li.querySelector('.qz-ans').hidden = false;
+            if (!q.options.length) return;
+            const picked = li.querySelector('.qz-opt.on');
+            if (!picked) blank++;
+            else if (+picked.dataset.o === q.correct) right++;
+            $$('.qz-opt', li).forEach(x => {
+              if (+x.dataset.o === q.correct) x.classList.add('right');
+              else if (x === picked) x.classList.add('wrong');
+            });
+            li.classList.add(picked && +picked.dataset.o === q.correct ? 'ok' : 'bad');
+          });
+          list.classList.add('done');
+          const pct = nMcq ? Math.round(right / nMcq * 100) : 0;
+          score.hidden = false;
+          score.innerHTML = nMcq
+            ? `<b>${right}/${nMcq}</b> câu trắc nghiệm đúng · <b>${(right / nMcq * 10).toFixed(1).replace('.', ',')}</b> điểm${blank ? ` · bỏ trống ${blank} câu` : ''}<span class="muted">${pct >= 80 ? ' — Rất tốt! 🎉' : pct >= 50 ? ' — Khá, xem lại các câu sai nhé.' : ' — Cần ôn thêm, đọc kỹ phần giải thích.'}</span>${nMcq < quiz.questions.length ? '<div class="muted" style="font-size:13px">Câu tự luận: em tự so với đáp án mẫu.</div>' : ''}`
+            : 'Em hãy tự so câu trả lời với đáp án mẫu bên dưới mỗi câu.';
+          score.classList.toggle('good', pct >= 50);
+          $('[data-qz="submit"]', m).hidden = true; $('[data-qz="retry"]', m).hidden = false;
+          score.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else if (act === 'retry') {
+          list.classList.remove('done'); shuffle(); fill();
+          list.scrollIntoView({ block: 'start' });
+        } else if (act === 'print') printQuiz(quiz, order);
+        else if (act === 'new') { next = 'new'; close(); }
+        else if (act === 'del') {
+          next = 'del'; close();
+        }
+      });
+    },
+  });
+  if (next === 'new') quizSetup();
+  if (next === 'del' && await confirmBox('Xóa bộ câu hỏi?', 'Bộ câu hỏi sẽ bị xóa khỏi sơ đồ này. Bạn có thể nhờ AI soạn bộ khác bất cứ lúc nào.')) {
+    delete S.map.quiz; scheduleSave(); toast('Đã xóa bộ câu hỏi');
+  }
+}
+/** In đề (phương án theo thứ tự đang hiển thị) và trang đáp án riêng. */
+function printQuiz(quiz, order) {
+  const w = window.open('', '_blank');
+  if (!w) { toast('Trình duyệt đã chặn cửa sổ mới — hãy cho phép popup'); return; }
+  const title = esc(S.map.title) + (quiz.scope ? ` — ${esc(quiz.scope)}` : '');
+  const qs = quiz.questions.map((q, i) => `<li><div>${richText(q.q)}</div>${q.options.length
+    ? `<ol class="opts">${order[i].map((o, k) => `<li><b>${LETTERS[k]}.</b> ${richText(q.options[o])}</li>`).join('')}</ol>`
+    : '<div class="lines"></div><div class="lines"></div>'}</li>`).join('');
+  const ans = quiz.questions.map((q, i) => `<li><b>${q.options.length ? LETTERS[order[i].indexOf(q.correct)] + '.' : ''}</b> ${richText(q.options.length ? q.options[q.correct] : q.answer)}${q.explain ? `<div class="ex">${richText(q.explain)}</div>` : ''}</li>`).join('');
+  w.document.write(`<!doctype html><html lang="vi"><meta charset="utf-8"><title>${title}</title>
+<style>
+  body{font:15px/1.55 'Be Vietnam Pro',Arial,sans-serif;color:#111;max-width:760px;margin:24px auto;padding:0 16px}
+  h1{font-size:20px;margin:0 0 4px}.sub{color:#555;margin:0 0 18px}
+  ol.qs>li{margin:0 0 14px;break-inside:avoid}.opts{list-style:none;padding:0;margin:6px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:4px 18px}
+  .lines{border-bottom:1px dotted #999;height:26px}.ex{color:#555;font-size:13px}
+  .ans{break-before:page}svg{vertical-align:middle}
+  @media print{body{margin:0}}
+</style>
+<h1>${title}</h1><p class="sub">Họ và tên: ................................................ Lớp: .............</p>
+<ol class="qs">${qs}</ol>
+<div class="ans"><h1>Đáp án</h1><ol>${ans}</ol></div>
+<script>setTimeout(()=>print(),300)<\/script>`);
+  w.document.close();
+}
+
+/* =====================================================================
    CHIA SẺ BẰNG LINK — nén cả sơ đồ vào đường link, không cần máy chủ
    ===================================================================== */
 const b64url = bytes => {
@@ -2745,6 +3021,7 @@ async function packMap(map) {
     return { ...rest, children: n.children.map(strip) };
   };
   const data = { v: 1, title: map.title, theme: map.theme, layout: map.layout, root: strip(map.root), relations: map.relations };
+  if (map.quiz?.questions?.length) data.quiz = map.quiz;
   const stream = new Blob([JSON.stringify(data)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   return { code: b64url(new Uint8Array(await new Response(stream).arrayBuffer())), images, files };
 }
@@ -2771,6 +3048,7 @@ async function shareMap() {
       <div class="seg" style="grid-template-columns:repeat(3,1fr);margin-bottom:10px">
         <button class="on" data-q="0">Xem bình thường</button><button data-q="1">Ôn tập: che hết</button><button data-q="2">Ôn tập: che ý con</button>
       </div>
+      ${S.map.quiz?.questions?.length ? `<div class="seg" style="grid-template-columns:1fr;margin-bottom:10px"><button data-q="q">${icon('check')} Làm bài ${S.map.quiz.questions.length} câu hỏi ôn tập (mở link là vào làm bài)</button></div>` : ''}
       <div class="row"><input class="field" id="share-link" readonly style="flex:1"><button class="btn primary" id="share-copy">Sao chép</button></div>
       ${warn.map(w => `<p class="muted" style="font-size:13px;margin:10px 0 0">${esc(w)}</p>`).join('')}`,
     actions: [{ label: 'Đóng', value: null }],
@@ -2779,7 +3057,7 @@ async function shareMap() {
       let q = 0;
       inp.value = link(q);
       $$('[data-q]', m).forEach(b => b.onclick = () => {
-        q = +b.dataset.q; inp.value = link(q);
+        q = b.dataset.q; inp.value = link(q);
         $$('[data-q]', m).forEach(x => x.classList.toggle('on', x === b));
       });
       $('#share-copy', m).onclick = async () => {
@@ -2790,7 +3068,8 @@ async function shareMap() {
     },
   });
 }
-async function openShared(quizDepth, code) {
+async function openShared(mode, code) {
+  const quizDepth = /^\d$/.test(mode) ? +mode : 0;
   let data;
   try { data = await unpackMap(code); } catch (err) { console.error(err); toast('Link chia sẻ bị hỏng hoặc không đầy đủ'); location.hash = '#/'; return; }
   const root = normalizeNode(data.root);
@@ -2799,9 +3078,11 @@ async function openShared(quizDepth, code) {
     id: 'shared', theme: THEMES[data.theme] ? data.theme : 'classic', layout: LAYOUTS[data.layout] ? data.layout : 'map',
     relations: (data.relations || []).filter(r => ids.has(r.from) && ids.has(r.to)).map(r => ({ id: r.id || uid(), from: r.from, to: r.to, label: r.label || '' })),
   });
+  if (data.quiz?.questions?.length) map.quiz = data.quiz;
   showMap(map, { temp: true });
   saveNow();
   if (quizDepth) startQuiz(quizDepth);
+  else if (mode === 'q' && map.quiz) quizPlayer();
 }
 function saveShared() {
   if (!S.temp) return;
@@ -2983,6 +3264,7 @@ const ACTIONS = {
   'install-app': installApp,
   drive: driveDialog,
   quiz: () => (S.quiz ? stopQuiz() : startQuiz()),
+  questions: questionsAction,
   'quiz-exit': stopQuiz,
   'quiz-all': () => quizAll(true),
   'quiz-reset': () => quizAll(false),
@@ -3110,6 +3392,7 @@ $('#file-input').addEventListener('change', async e => {
       map = newMap(root, o.title || root.text, { theme: THEMES[o.theme] ? o.theme : 'classic', layout: LAYOUTS[o.layout] ? o.layout : 'map' });
       const ids = new Set(); walk(root, n => { ids.add(n.id); });
       map.relations = (o.relations || []).filter(r => ids.has(r.from) && ids.has(r.to)).map(r => ({ id: r.id || uid(), from: r.from, to: r.to, label: r.label || '' }));
+      if (o.quiz?.questions?.length) map.quiz = o.quiz;
     } else if (/\.(mm|opml|xml)$/i.test(f.name)) {
       const root = parseXmlTree(text);
       if (root) map = newMap(root, root.text);
@@ -3165,8 +3448,8 @@ function showHome() {
   renderHome();
 }
 function route() {
-  const sh = /^#\/s\/(\d)\/([\w-]+)/.exec(location.hash);
-  if (sh) { leaveEditor(); openShared(+sh[1], sh[2]); return; }
+  const sh = /^#\/s\/(\d|q)\/([\w-]+)/.exec(location.hash);
+  if (sh) { leaveEditor(); openShared(sh[1], sh[2]); return; }
   const m = /^#\/map\/([\w-]+)/.exec(location.hash);
   if (m) { if (S.map?.id !== m[1]) { leaveEditor(); openMap(m[1]); } }
   else showHome();

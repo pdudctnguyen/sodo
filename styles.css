@@ -421,3 +421,33 @@ kbd {
 .drive-btn.warn .cloud { color: #d9480f; }
 .tb .drive-btn .lbl { font-size: 12px; color: var(--muted); }
 @media (max-width: 900px) { .tb .drive-btn .lbl { display: none; } }
+
+/* ---------- Câu hỏi ôn tập ---------- */
+.qz-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; }
+.qz-q { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.qz-q.ok { border-color: #20a36b; } .qz-q.bad { border-color: #e5484d; }
+.qz-text { margin-bottom: 8px; line-height: 1.5; }
+.qz-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.qz-opt {
+  display: flex; gap: 8px; align-items: baseline; text-align: left; padding: 8px 10px; border-radius: 9px;
+  border: 1px solid var(--line-2); background: var(--surface); font: inherit; color: inherit; cursor: pointer;
+}
+.qz-opt b { color: var(--muted); flex: none; }
+.qz-opt:hover { background: var(--surface-2); }
+.qz-opt.on { border-color: var(--accent, #4f46e5); background: rgba(79, 70, 229, .08); }
+.qz-opt.right { border-color: #20a36b; background: rgba(32, 163, 107, .12); }
+.qz-opt.wrong { border-color: #e5484d; background: rgba(229, 72, 77, .1); }
+.done .qz-opt { cursor: default; }
+.qz-write { width: 100%; resize: vertical; }
+.qz-ans { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 14px; }
+.qz-ans .muted { margin-top: 2px; }
+.qz-math svg { vertical-align: middle; }
+.qz-score { padding: 10px 14px; border-radius: 10px; background: rgba(229, 72, 77, .1); margin-bottom: 12px; }
+.qz-score.good { background: rgba(32, 163, 107, .12); }
+.qz-tools { margin-top: 14px; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 600px) { .qz-opts { grid-template-columns: 1fr; } }
+.tbtn .lbl { white-space: nowrap; }
+/* Thanh công cụ hẹp: ẩn chữ của các nút đã có phím tắt quen thuộc trước, giữ chữ cho AI / Câu hỏi / Chia sẻ */
+@media (max-width: 1420px) {
+  .tbtn[data-act="add-child"] .lbl, .tbtn[data-act="add-sibling"] .lbl, .tbtn[data-act="relate"] .lbl, .tb .drive-btn .lbl { display: none; }
+}

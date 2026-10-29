@@ -129,6 +129,8 @@ const LAYOUTS = {
   left: { name: 'Sang trái', svg: '<rect x="68" y="17" width="24" height="10" rx="3" fill="currentColor"/><path d="M68 22c-10 0-10-16-22-16M68 22H46M68 22c-10 0-10 16-22 16" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 6h22M20 22h22M20 38h22" stroke="currentColor" stroke-width="3"/>' },
   down: { name: 'Sơ đồ tổ chức', svg: '<rect x="38" y="3" width="24" height="10" rx="3" fill="currentColor"/><path d="M50 13v8M20 21h60M20 21v6M50 21v6M80 21v6" stroke="currentColor" stroke-width="2" fill="none"/><rect x="10" y="29" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="40" y="29" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="70" y="29" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>' },
   tree: { name: 'Cây thư mục', svg: '<rect x="24" y="3" width="26" height="9" rx="3" fill="currentColor"/><path d="M30 12v26M30 20h10M30 29h10M30 38h10" stroke="currentColor" stroke-width="2" fill="none"/><path d="M44 20h28M44 29h22M44 38h30" stroke="currentColor" stroke-width="3"/>' },
+  timeline: { name: 'Trục thời gian', svg: '<rect x="2" y="17" width="18" height="10" rx="3" fill="currentColor"/><path d="M20 22h74M88 17l6 5-6 5M33 18V7h14M55 26v11h14M77 18V7h12" stroke="currentColor" stroke-width="2" fill="none"/><rect x="27" y="18" width="13" height="8" rx="2" fill="currentColor"/><rect x="49" y="18" width="13" height="8" rx="2" fill="currentColor"/><rect x="71" y="18" width="13" height="8" rx="2" fill="currentColor"/>' },
+  fishbone: { name: 'Xương cá', svg: '<rect x="76" y="16" width="22" height="12" rx="3" fill="currentColor"/><path d="M76 22H4M68 22 58 5M46 22 36 5M24 22 14 5M68 22 58 39M46 22 36 39M24 22 14 39M50 12h11M28 12h11M50 32h11M28 32h11" stroke="currentColor" stroke-width="2" fill="none"/>' },
 };
 
 const SWATCH = ['#f0643c', '#f2a516', '#e9c46a', '#20a36b', '#0fa3b1', '#2f80ed', '#4f46e5', '#9b51e0', '#e8488a', '#c92a2a', '#5c6474', '#1f2937'];
@@ -361,6 +363,35 @@ const TEMPLATES = [
     Thư viện – Thiết bị
   Đoàn – Đội
     Ban chấp hành Đoàn` },
+  {
+    id: 'timeline', name: 'Dòng thời gian', layout: 'timeline', theme: 'fresh', text: `Việt Nam 1930 – 1975
+  1930
+    Thành lập Đảng Cộng sản Việt Nam
+  1945
+    Cách mạng tháng Tám
+    2/9: Tuyên ngôn Độc lập
+  1954
+    Chiến thắng Điện Biên Phủ
+    Hiệp định Giơ-ne-vơ
+  1975
+    Giải phóng miền Nam
+    Thống nhất đất nước` },
+  {
+    id: 'fishbone', name: 'Phân tích nguyên nhân', layout: 'fishbone', text: `Kết quả học tập chưa cao
+  Học sinh
+    Chưa tự giác ôn bài
+    Mất gốc kiến thức cũ
+  Phương pháp
+    Ít hoạt động thực hành
+    Chưa phân hóa theo năng lực
+  Giáo viên
+    Lớp quá đông
+    Ít thời gian kèm riêng
+  Gia đình
+    Ít quan tâm việc học
+    Thiếu góc học tập
+  Cơ sở vật chất
+    Thiếu thiết bị dạy học` },
 ];
 const GUIDE = {
   name: 'Hướng dẫn sử dụng', icons: ['👋', '🧭', '🎨', '📤'], text: `Chào mừng đến với Sodo
@@ -605,6 +636,23 @@ function computeLayout(map) {
   }
   const root = prep(map.root, 0, null, 0);
   const edge = (p, c, d) => edges.push({ from: p.id, to: c.id, d, color: c.color, w: c.ew });
+  // Danh sách thụt lề kiểu cây thư mục: nút ở (left, top), con xếp dọc bên dưới; trả về chiều cao khối
+  const treeIn = b => (b.depth === 0 ? 40 : 32);
+  const treeH = b => (b.kids.length ? b.h + 12 + b.kids.reduce((a, k) => a + treeH(k) + 10, -10) : b.h);
+  const treeW = b => Math.max(b.w, ...b.kids.map(k => treeIn(b) + treeW(k)));
+  const extentOf = (b, f, a0) => b.kids.reduce((a, k) => extentOf(k, f, a), f(a0, b));
+  const treePlace = (b, left, top) => {
+    b.dir = 'tree'; b.x = left; b.y = top;
+    let cy = top + b.h + 12;
+    const x0 = b.x + Math.min(18, b.w / 2), y0 = b.y + b.h;
+    for (const k of b.kids) {
+      const hk = treePlace(k, left + treeIn(b), cy);
+      const ky = anchorY(k), r = Math.min(8, ky - y0);
+      edge(b, k, `M${x0},${y0} V${ky - r} Q${x0},${ky} ${x0 + r},${ky} H${k.x}`);
+      cy += hk + 10;
+    }
+    return b.kids.length ? cy - 10 - top : b.h;
+  };
 
   if (mode === 'down') {
     const HG = d => (d === 0 ? 40 : 22), VG = d => (d === 0 ? 64 : 46);
@@ -628,19 +676,70 @@ function computeLayout(map) {
     };
     measure(root); place(root, -root.sw / 2, -root.h / 2);
   } else if (mode === 'tree') {
-    const place = (b, left, top) => {
-      b.dir = 'tree'; b.x = left; b.y = top;
-      let cy = top + b.h + 12;
-      const x0 = b.x + Math.min(18, b.w / 2), y0 = b.y + b.h;
-      for (const k of b.kids) {
-        const hk = place(k, left + (b.depth === 0 ? 40 : 32), cy);
-        const ky = anchorY(k), r = Math.min(8, ky - y0);
-        edge(b, k, `M${x0},${y0} V${ky - r} Q${x0},${ky} ${x0 + r},${ky} H${k.x}`);
-        cy += hk + 10;
+    treePlace(root, -root.w / 2, -root.h / 2);
+  } else if (mode === 'timeline') {
+    // Gốc bên trái, các mốc (cấp 1) nằm trên trục ngang; ý con treo xen kẽ trên/dưới trục
+    root.dir = 1; root.x = -root.w / 2; root.y = -root.h / 2;
+    const axis = { color: root.color, w: 3 }, band = Math.max(root.h / 2, ...root.kids.map(k => k.h / 2)) + 16;
+    const ext = [-Infinity, -Infinity];
+    let ax = root.x + root.w, prev = root;
+    root.kids.forEach((k, i) => {
+      const up = i % 2 === 0, side = up ? 0 : 1;
+      k.dir = up ? 'tree-up' : 'tree';
+      k.x = Math.max(ax + 40, ext[side] + 28); k.y = -k.h / 2;
+      edges.push({ from: prev.id, to: k.id, d: `M${ax},0 H${k.x}`, ...axis });
+      if (k.kids.length) {
+        const x0 = k.x + Math.min(18, k.w / 2);
+        if (up) {
+          let cy = -band - k.kids.reduce((a, c) => a + treeH(c) + 10, -10);
+          for (const c of k.kids) {
+            const hc = treePlace(c, k.x + 32, cy), ky = anchorY(c), r = Math.min(8, k.y - ky);
+            edge(k, c, `M${x0},${k.y} V${ky + r} Q${x0},${ky} ${x0 + r},${ky} H${c.x}`);
+            cy += hc + 10;
+          }
+        } else {
+          let cy = band;
+          const y0 = k.y + k.h;
+          for (const c of k.kids) {
+            const hc = treePlace(c, k.x + 32, cy), ky = anchorY(c), r = Math.min(8, ky - y0);
+            edge(k, c, `M${x0},${y0} V${ky - r} Q${x0},${ky} ${x0 + r},${ky} H${c.x}`);
+            cy += hc + 10;
+          }
+        }
       }
-      return Math.max(b.h, cy - 10 - top);
-    };
-    place(root, -root.w / 2, -root.h / 2);
+      ext[side] = Math.max(ext[side], extentOf(k, (a, c) => Math.max(a, c.x + c.w), -Infinity));
+      ax = k.x + k.w; prev = k;
+    });
+    const end = ax + 44;
+    edges.push({ from: prev.id, to: prev.id, d: `M${ax},0 H${end} M${end - 9},-6 L${end},0 L${end - 9},6`, ...axis });
+  } else if (mode === 'fishbone') {
+    // Đầu cá (gốc) bên phải, xương sống nằm ngang; nhóm nguyên nhân (cấp 1) trên các xương chéo,
+    // nguyên nhân (cấp 2) là các gân ngang gắn vào xương chéo
+    root.dir = -1; root.x = -root.w / 2; root.y = -root.h / 2;
+    const m = 0.55, ext = [root.x - 6, root.x - 6], sxs = [];
+    root.kids.forEach((k, i) => {
+      const up = i % 2 === 0, side = up ? 0 : 1, s = up ? -1 : 1;
+      k.dir = up ? 'down' : 'up';
+      const causes = up ? k.kids.slice().reverse() : k.kids;
+      const slots = [];
+      let d = 22;
+      for (const c of causes) { const th = treeH(c); slots.push([c, d, th]); d += th + 12; }
+      const hb = Math.max(48, d - 12 + 18);
+      const sx = ext[side] - 34 - Math.max(0, k.w / 2 - m * hb);
+      const bx = t => sx - m * t;
+      sxs.push(sx);
+      k.x = bx(hb) - k.w / 2; k.y = up ? -hb - k.h : hb;
+      edge(root, k, `M${sx},0 L${bx(hb)},${s * hb}`);
+      for (const [c, d0, th] of slots) {
+        const tw = treeW(c);
+        treePlace(c, bx(d0 + th) - 14 - tw, up ? -(d0 + th) : d0);
+        const ay = anchorY(c);
+        edge(k, c, `M${c.x + c.w},${ay} H${bx(Math.abs(ay))}`);
+      }
+      ext[side] = Math.min(sx, extentOf(k, (a, c) => Math.min(a, c.x), Infinity));
+    });
+    const tail = Math.min(root.x - 60, ...sxs.map(x => x - 36), ...ext.map(x => x - 12));
+    edges.push({ from: root.id, to: root.id, d: `M${root.x},0 H${tail}`, color: root.color, w: 4 });
   } else {
     const HG = d => (d === 0 ? 64 : 38), VG = d => (d === 0 ? 22 : 10);
     const measure = b => {
@@ -901,6 +1000,8 @@ function togglePos(b) {
   const ay = anchorY(b) - b.y;
   if (b.dir === 'down') return [b.w / 2, b.h + 11];
   if (b.dir === 'tree') return [Math.min(18, b.w / 2), b.h + 11];
+  if (b.dir === 'tree-up') return [Math.min(18, b.w / 2), -11];
+  if (b.dir === 'up') return [b.w / 2, -11];
   return b.dir > 0 ? [b.w + 11, ay] : [-11, ay];
 }
 function countDesc(n) { return countNodes(n) - 1; }
@@ -1212,6 +1313,13 @@ function navigate(key) {
   } else if (L.mode === 'tree') {
     if (key === 'ArrowRight') t = b.kids[0];
     else if (key === 'ArrowLeft') t = b.parent;
+  } else if (L.mode === 'timeline' || L.mode === 'fishbone') {
+    // Mốc thời gian đi theo trục; các ý trong khối thụt lề đi lên/xuống như cây thư mục
+    const near = d => b.parent?.kids[b.parent.kids.indexOf(b) + d];
+    if (L.mode === 'timeline' && b.depth <= 1 && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+      t = b.depth === 0 ? (key === 'ArrowRight' ? b.kids[0] : null) : near(key === 'ArrowLeft' ? -1 : 1) || (key === 'ArrowLeft' ? b.parent : null);
+    } else if (b.depth >= 2 && (key === 'ArrowUp' || key === 'ArrowDown')) t = near(key === 'ArrowUp' ? -1 : 1);
+    else if (b.depth >= 2 && key === 'ArrowRight') t = b.kids[0];
   } else if (b.depth === 0 && (key === 'ArrowRight' || key === 'ArrowLeft')) {
     t = nearest(b.kids.filter(k => k.dir === (key === 'ArrowRight' ? 1 : -1)), cy);
   } else if (key === 'ArrowRight' || key === 'ArrowLeft') {
@@ -1328,13 +1436,15 @@ function onUp() {
     else render();
   }
 }
+/** Anh em xếp theo hàng ngang (chèn trước/sau theo trục x) thay vì theo cột. */
+const rowSibs = (L, b) => L.mode === 'down' || (L.mode === 'timeline' && b.depth === 1);
 function findDrop(p, skip) {
   const L = S.L;
   for (const b of L.boxes.values()) {
     if (skip.has(b.id)) continue;
     if (p.x < b.x - 8 || p.x > b.x + b.w + 8 || p.y < b.y - 8 || p.y > b.y + b.h + 8) continue;
     if (b.depth === 0) return { id: b.id, pos: 'child', side: p.x < b.x + b.w / 2 ? 'left' : 'right' };
-    const r = L.mode === 'down' ? (p.x - b.x) / b.w : (p.y - b.y) / b.h;
+    const r = rowSibs(L, b) ? (p.x - b.x) / b.w : (p.y - b.y) / b.h;
     return { id: b.id, pos: r < 0.28 ? 'before' : r > 0.72 ? 'after' : 'child' };
   }
   const root = L.root;
@@ -1351,7 +1461,7 @@ function showDrop(d) {
   const b = S.L.boxes.get(d.id);
   if (d.pos === 'child') { mark.hidden = true; nodesEl.querySelector(`.node[data-id="${d.id}"]`)?.classList.add('drop-child'); return; }
   mark.hidden = false;
-  if (S.L.mode === 'down') Object.assign(mark.style, { left: (d.pos === 'before' ? b.x - 10 : b.x + b.w + 7) + 'px', top: b.y + 'px', width: '3px', height: b.h + 'px' });
+  if (rowSibs(S.L, b)) Object.assign(mark.style, { left: (d.pos === 'before' ? b.x - 10 : b.x + b.w + 7) + 'px', top: b.y + 'px', width: '3px', height: b.h + 'px' });
   else Object.assign(mark.style, { left: b.x + 'px', top: (d.pos === 'before' ? b.y - 7 : b.y + b.h + 4) + 'px', width: b.w + 'px', height: '3px' });
 }
 

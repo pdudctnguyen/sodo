@@ -2,7 +2,7 @@
 
 Ứng dụng vẽ sơ đồ tư duy chạy hoàn toàn trên trình duyệt (HTML/CSS/JS thuần, không cần build).
 
-- Bố cục: sơ đồ tư duy, sang phải/trái, sơ đồ tổ chức, cây thư mục
+- Bố cục: sơ đồ tư duy, sang phải/trái, sơ đồ tổ chức, cây thư mục, trục thời gian, xương cá (nguyên nhân – kết quả)
 - Màu, hình dạng, biểu tượng, ghi chú, liên kết, ảnh, mối nối
 - Dàn ý, tìm kiếm, trình chiếu, chế độ ôn tập
 - Chia sẻ bằng link (dữ liệu nén trong link), xuất PNG/SVG/PDF/Markdown/FreeMind

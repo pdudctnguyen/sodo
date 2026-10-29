@@ -12,6 +12,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
 const FONT = "'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', sans-serif";
+const SKETCH_FONT = "'Pangolin', 'Be Vietnam Pro', system-ui, sans-serif";
 const EMOJI_FONT = "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
 
 const ICONS = {
@@ -40,6 +41,7 @@ const ICONS = {
   quiz: '<path d="M3 3l18 18"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-2.6 3.2M6.6 6.6C4.2 8.2 3 12 3 12s4 6 9 6c1.5 0 2.9-.4 4.1-1.1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
   reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
   check: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.5h6V4"/><path d="m9 13 2 2 4-4"/>',
 };
 const icon = n => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
@@ -579,9 +581,117 @@ function mathImage(svg, color) {
 const anchorY = b => (b.shape === 'underline' ? b.y + b.h - b.ul / 2 : b.y + b.h / 2);
 const radiusOf = b => ({ rounded: b.depth === 0 ? 16 : 10, rect: 3, pill: b.h / 2 }[b.shape] || 0);
 
+/* ---------------- Hình dạng nút & nét vẽ tay ---------------- */
+const PATH_SHAPES = new Set(['ellipse', 'cloud', 'hexagon']);
+const hashStr = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619); return h >>> 0; };
+const rng = seed => () => ((seed = Math.imul(seed ^ (seed >>> 15), 2246822507) + 0x6d2b79f5 >>> 0) / 4294967296);
+/** Đường viền của nút trong hệ tọa độ riêng (0,0)–(w,h), lùi 1px cho nét viền 2px. */
+function shapePath(shape, w, h, r) {
+  const f = v => +v.toFixed(2);
+  if (shape === 'ellipse') {
+    const rx = w / 2 - 1, ry = h / 2 - 1;
+    return `M1,${f(h / 2)} A${f(rx)},${f(ry)} 0 1 0 ${w - 1},${f(h / 2)} A${f(rx)},${f(ry)} 0 1 0 1,${f(h / 2)} Z`;
+  }
+  if (shape === 'hexagon') {
+    const k = Math.min(h * 0.3, w / 3);
+    return `M1,${f(h / 2)} L${f(k)},1 H${f(w - k)} L${w - 1},${f(h / 2)} L${f(w - k)},${h - 1} H${f(k)} Z`;
+  }
+  if (shape === 'cloud') {
+    // Các "múi" cung tròn nối các điểm trên một hình elip nhỏ hơn
+    const bump = Math.min(w, h) * 0.13, rx = w / 2 - bump - 1, ry = h / 2 - bump - 1;
+    const per = Math.PI * (3 * (rx + ry) - Math.sqrt((3 * rx + ry) * (rx + 3 * ry)));
+    const n = Math.max(7, Math.round(per / (bump * 3.6)));
+    const pts = Array.from({ length: n }, (_, i) => { const a = (i / n) * Math.PI * 2 + 0.3; return [w / 2 + rx * Math.cos(a), h / 2 + ry * Math.sin(a)]; });
+    let d = `M${f(pts[0][0])},${f(pts[0][1])}`;
+    for (let i = 1; i <= n; i++) {
+      const [x0, y0] = pts[i - 1], [x, y] = pts[i % n];
+      const rr = Math.hypot(x - x0, y - y0) * 0.62;
+      d += ` A${f(rr)},${f(rr)} 0 0 1 ${f(x)},${f(y)}`;
+    }
+    return d + ' Z';
+  }
+  r = Math.max(0, Math.min(r - 1, (h - 2) / 2, (w - 2) / 2));
+  const R = f(r), x2 = w - 1, y2 = h - 1;
+  return r ? `M${f(1 + r)},1 H${f(x2 - r)} A${R},${R} 0 0 1 ${x2},${f(1 + r)} V${f(y2 - r)} A${R},${R} 0 0 1 ${f(x2 - r)},${y2} H${f(1 + r)} A${R},${R} 0 0 1 1,${f(y2 - r)} V${f(1 + r)} A${R},${R} 0 0 1 ${f(1 + r)},1 Z`
+    : `M1,1 H${x2} V${y2} H1 Z`;
+}
+/** Làm nét "run tay": lấy mẫu dọc đường path rồi lệch nhẹ theo pháp tuyến bằng nhiễu mượt (cố định theo seed). */
+const roughCache = new Map();
+let roughEl = null;
+function roughen(d, seed, amp, closed = false) {
+  const key = `${seed}|${amp}|${closed ? 1 : 0}|${d}`;
+  const hit = roughCache.get(key);
+  if (hit) return hit;
+  if (!roughEl) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden;visibility:hidden');
+    roughEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    svg.appendChild(roughEl); document.body.appendChild(svg);
+  }
+  const rand = rng(seed), out = [];
+  for (const sub of d.split(/(?=M)/)) {
+    roughEl.setAttribute('d', sub);
+    const L = roughEl.getTotalLength();
+    if (!(L > 1)) { out.push(sub); continue; }
+    const n = Math.max(4, Math.ceil(L / 7));
+    // Đường khép kín dùng tần số nguyên để điểm đầu và cuối khớp nhau
+    const f1 = closed ? 1 + Math.floor(rand() * 2) : 0.6 + rand() * 1.2, f2 = closed ? 3 + Math.floor(rand() * 3) : 2.5 + rand() * 2.5;
+    const p1 = rand() * 6.283, p2 = rand() * 6.283;
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const s = (i / n) * L, t = closed ? (i / n) * 6.283 : s / 55;
+      const p = roughEl.getPointAtLength(s), q = roughEl.getPointAtLength(Math.min(L, s + 0.5)), o = roughEl.getPointAtLength(Math.max(0, s - 0.5));
+      const tx = q.x - o.x, ty = q.y - o.y, tl = Math.hypot(tx, ty) || 1;
+      const taper = closed ? 1 : Math.min(1, Math.sin(Math.PI * i / n) * 1.6 + 0.15);
+      const k = amp * taper * (Math.sin(t * f1 + p1) + 0.45 * Math.sin(t * f2 + p2));
+      pts.push([p.x - (ty / tl) * k, p.y + (tx / tl) * k]);
+    }
+    if (closed) pts[pts.length - 1] = pts[0];
+    const f = v => v.toFixed(1);
+    let path = `M${f(pts[0][0])},${f(pts[0][1])}`;
+    for (let i = 1; i < pts.length - 1; i++) path += ` Q${f(pts[i][0])},${f(pts[i][1])} ${f((pts[i][0] + pts[i + 1][0]) / 2)},${f((pts[i][1] + pts[i + 1][1]) / 2)}`;
+    path += ` L${f(pts.at(-1)[0])},${f(pts.at(-1)[1])}${closed ? ' Z' : ''}`;
+    out.push(path);
+  }
+  const res = out.join(' ');
+  if (roughCache.size > 4000) roughCache.clear();
+  roughCache.set(key, res);
+  return res;
+}
+/** Dịch một path chỉ gồm lệnh tuyệt đối (M L H V C Q A Z) đi (dx, dy). */
+function shiftPath(d, dx, dy) {
+  const f = v => +v.toFixed(2);
+  return d.replace(/([MLHVCQAZ])([^MLHVCQAZ]*)/g, (_, c, args) => {
+    const n = (args.match(/-?\d*\.?\d+(?:e-?\d+)?/g) || []).map(Number);
+    if (c === 'H') return 'H' + n.map(v => f(v + dx)).join(' ');
+    if (c === 'V') return 'V' + n.map(v => f(v + dy)).join(' ');
+    if (c === 'A') return 'A' + n.map((v, i) => (i % 7 === 5 ? f(v + dx) : i % 7 === 6 ? f(v + dy) : v)).join(' ');
+    if (c === 'Z') return 'Z';
+    return c + n.map((v, i) => f(v + (i % 2 ? dy : dx))).join(' ');
+  });
+}
+/** Như roughen nhưng tính theo hình dạng tương đối, nên đường nối chỉ bị dịch chỗ vẫn dùng lại được kết quả cũ. */
+function roughenAt(d, seed, amp) {
+  const m = /M\s*(-?[\d.]+)[ ,](-?[\d.]+)/.exec(d);
+  if (!m) return roughen(d, seed, amp);
+  const ox = +m[1], oy = +m[2];
+  return shiftPath(roughen(shiftPath(d, -ox, -oy), seed, amp), ox, oy);
+}
+let sketchFont = 'idle';
+function loadSketchFont() {
+  if (sketchFont !== 'idle') return;
+  sketchFont = 'loading';
+  document.fonts.load('16px "Pangolin"', 'Tiếng Việt').then(() => {
+    sketchFont = 'ready'; wcache.clear();
+    if (S.map?.sketch) render();
+  }).catch(() => { sketchFont = 'failed'; });
+}
+
 function computeLayout(map) {
   const theme = THEMES[map.theme] || THEMES.classic;
   const mode = map.layout || 'map';
+  const fam = map.sketch ? SKETCH_FONT : FONT;
+  if (map.sketch) loadSketchFont();
   const boxes = new Map(), edges = [];
 
   function prep(n, depth, branch, idx) {
@@ -603,7 +713,7 @@ function computeLayout(map) {
 
     const fs = st.fontSize || (depth === 0 ? 24 : depth === 1 ? 17 : 14);
     const weight = st.bold != null ? (st.bold ? 700 : 400) : depth === 0 ? 700 : depth === 1 ? 600 : 400;
-    const font = `${st.italic ? 'italic ' : ''}${weight} ${fs}px ${FONT}`;
+    const font = `${st.italic ? 'italic ' : ''}${weight} ${fs}px ${fam}`;
     const lh = Math.round(fs * 1.35);
     const [padX0, padT, padB] = boxed ? (depth === 0 ? [24, 14, 14] : depth === 1 ? [16, 9, 9] : [12, 6, 6]) : [4, 3, 7];
     const padX = shape === 'pill' ? padX0 + 6 : padX0;
@@ -623,14 +733,25 @@ function computeLayout(map) {
     const innerW = Math.max(contentW, imgW);
     const padL = padX + (innerW - contentW) / 2;
     const padTop = padT + (imgH ? imgH + 8 : 0);
-    const w = Math.ceil(padX * 2 + innerW);
-    const h = Math.ceil(padTop + padB + Math.max(textH, iconW ? fs * 1.3 : 0));
+    const w0 = Math.ceil(padX * 2 + innerW);
+    const h0 = Math.ceil(padTop + padB + Math.max(textH, iconW ? fs * 1.3 : 0));
+    // Hình bầu dục / đám mây / lục giác cần thêm chỗ để chữ nằm gọn bên trong
+    const [dx, dy] = shape === 'hexagon' ? [Math.round(h0 * 0.3), 0]
+      : shape === 'ellipse' ? [Math.round(w0 * 0.1 + 4), Math.round(h0 * 0.16 + 2)]
+      : shape === 'cloud' ? [Math.round(w0 * 0.14 + 8), Math.round(h0 * 0.25 + 6)] : [0, 0];
+    const w = w0 + 2 * dx, h = h0 + 2 * dy;
     const b = {
       id: n.id, node: n, depth, x: 0, y: 0, w, h, color, fill, stroke, text, shape, fs, font, lh, lines,
-      padX, padL, padT: padTop, padB, textW, textH, mlines, iconW, indW, dir: 1, kids: [],
-      imgX: padX + (innerW - imgW) / 2, imgY: padT, imgW, imgH,
+      padX: padX + dx, padL: padL + dx, padT: padTop + dy, padB: padB + dy, textW, textH, mlines, iconW, indW, dir: 1, kids: [],
+      imgX: padX + dx + (innerW - imgW) / 2, imgY: padT + dy, imgW, imgH,
       ew: depth === 1 ? 3.5 : depth === 2 ? 2.2 : 1.6, ul: depth <= 1 ? 3 : 2,
     };
+    // Hình vẽ bằng đường path (hình đặc biệt, hoặc mọi khung khi bật kiểu vẽ tay)
+    if (boxed && (PATH_SHAPES.has(shape) || map.sketch)) {
+      const d = shapePath(shape, w, h, radiusOf(b));
+      // Vẽ tay: viền đi hai lượt lệch nhau như nét bút chì
+      b.path = map.sketch ? roughen(d, hashStr(n.id), 1.9, true) + ' ' + roughen(d, hashStr(n.id) + 7, 1.6, true) : d;
+    } else if (shape === 'underline' && map.sketch) b.upath = roughen(`M1,${h - b.ul / 2} H${w - 1}`, hashStr(n.id), 1.4);
     boxes.set(n.id, b);
     if (!n.collapsed) n.children.forEach((c, i) => { const k = prep(c, depth + 1, color, i); k.parent = b; b.kids.push(k); });
     return b;
@@ -773,11 +894,13 @@ function computeLayout(map) {
     if (left.length) placeGroup(root, left, -1, 0);
   }
 
+  if (map.sketch) for (const e of edges) e.d = roughenAt(e.d, hashStr(e.from + e.to), 2.6);
+
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
   for (const b of boxes.values()) {
     x1 = Math.min(x1, b.x); y1 = Math.min(y1, b.y); x2 = Math.max(x2, b.x + b.w); y2 = Math.max(y2, b.y + b.h);
   }
-  return { boxes, edges, root, theme, mode, bounds: { x: x1, y: y1, w: x2 - x1, h: y2 - y1 } };
+  return { boxes, edges, root, theme, mode, font: fam, bounds: { x: x1, y: y1, w: x2 - x1, h: y2 - y1 } };
 }
 
 /** Hình học của một mối nối (đường cong nét đứt có mũi tên). */
@@ -839,9 +962,20 @@ function roundRectPath(ctx, x, y, w, h, r) {
 }
 function drawNodeCanvas(ctx, b) {
   const r = radiusOf(b);
-  if (b.fill && b.fill !== 'transparent') { ctx.fillStyle = b.fill; roundRectPath(ctx, b.x, b.y, b.w, b.h, r); ctx.fill(); }
-  if (b.shape === 'underline') { ctx.fillStyle = b.color; ctx.fillRect(b.x, b.y + b.h - b.ul, b.w, b.ul); }
-  else if (b.stroke) { ctx.strokeStyle = b.stroke; ctx.lineWidth = 2; roundRectPath(ctx, b.x + 1, b.y + 1, b.w - 2, b.h - 2, Math.max(0, r - 1)); ctx.stroke(); }
+  if (b.path || b.upath) {
+    ctx.save(); ctx.translate(b.x, b.y);
+    if (b.path) {
+      const p = new Path2D(b.path);
+      if (b.fill && b.fill !== 'transparent') { ctx.fillStyle = b.fill; ctx.fill(p); }
+      if (b.stroke) { ctx.strokeStyle = b.stroke; ctx.lineWidth = 2; ctx.stroke(p); }
+    }
+    if (b.upath) { ctx.strokeStyle = b.color; ctx.lineWidth = b.ul; ctx.stroke(new Path2D(b.upath)); }
+    ctx.restore();
+  } else {
+    if (b.fill && b.fill !== 'transparent') { ctx.fillStyle = b.fill; roundRectPath(ctx, b.x, b.y, b.w, b.h, r); ctx.fill(); }
+    if (b.shape === 'underline') { ctx.fillStyle = b.color; ctx.fillRect(b.x, b.y + b.h - b.ul, b.w, b.ul); }
+    else if (b.stroke) { ctx.strokeStyle = b.stroke; ctx.lineWidth = 2; roundRectPath(ctx, b.x + 1, b.y + 1, b.w - 2, b.h - 2, Math.max(0, r - 1)); ctx.stroke(); }
+  }
   const innerH = b.h - b.padT - b.padB, midY = b.y + b.padT + innerH / 2;
   const top = midY - b.textH / 2;
   let x = b.x + b.padL;
@@ -873,17 +1007,23 @@ function drawNodeCanvas(ctx, b) {
     if (b.node.files?.length) ctx.fillText('📎', ix, midY);
   }
 }
+/** Khung nút vẽ bằng path (dùng chung cho màn hình và xuất SVG). */
+const nodeShapeSVG = b => (b.path ? `<path d="${b.path}" fill="${b.fill === 'transparent' ? 'none' : b.fill}" stroke="${b.stroke || 'none'}" stroke-width="2" stroke-linejoin="round"/>` : '')
+  + (b.upath ? `<path d="${b.upath}" fill="none" stroke="${b.color}" stroke-width="${b.ul}" stroke-linecap="round"/>` : '');
 function renderSVG(map) {
   const L = computeLayout(map), bb = L.bounds, pad = 48;
   const W = Math.ceil(bb.w + pad * 2), H = Math.ceil(bb.h + pad * 2);
-  const o = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${bb.x - pad} ${bb.y - pad} ${W} ${H}" font-family="${FONT}">`,
+  const o = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${bb.x - pad} ${bb.y - pad} ${W} ${H}" font-family="${esc(L.font)}">`,
     `<rect x="${bb.x - pad}" y="${bb.y - pad}" width="${W}" height="${H}" fill="${L.theme.bg}"/>`];
   for (const e of L.edges) o.push(`<path d="${e.d}" fill="none" stroke="${e.color}" stroke-width="${e.w}" stroke-linecap="round"/>`);
   for (const b of L.boxes.values()) {
     const r = radiusOf(b);
-    if (b.fill !== 'transparent') o.push(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${r}" fill="${b.fill}"/>`);
-    if (b.shape === 'underline') o.push(`<rect x="${b.x}" y="${b.y + b.h - b.ul}" width="${b.w}" height="${b.ul}" fill="${b.color}"/>`);
-    else if (b.stroke) o.push(`<rect x="${b.x + 1}" y="${b.y + 1}" width="${b.w - 2}" height="${b.h - 2}" rx="${Math.max(0, r - 1)}" fill="none" stroke="${b.stroke}" stroke-width="2"/>`);
+    if (b.path || b.upath) o.push(`<g transform="translate(${b.x} ${b.y})">${nodeShapeSVG(b)}</g>`);
+    else {
+      if (b.fill !== 'transparent') o.push(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${r}" fill="${b.fill}"/>`);
+      if (b.shape === 'underline') o.push(`<rect x="${b.x}" y="${b.y + b.h - b.ul}" width="${b.w}" height="${b.ul}" fill="${b.color}"/>`);
+      else if (b.stroke) o.push(`<rect x="${b.x + 1}" y="${b.y + 1}" width="${b.w - 2}" height="${b.h - 2}" rx="${Math.max(0, r - 1)}" fill="none" stroke="${b.stroke}" stroke-width="2"/>`);
+    }
     const midY = b.y + b.padT + (b.h - b.padT - b.padB) / 2, top = midY - b.textH / 2;
     let x = b.x + b.padL;
     if (b.node.image) o.push(`<image href="${b.node.image.src}" x="${b.x + b.imgX}" y="${b.y + b.imgY}" width="${b.imgW}" height="${b.imgH}" preserveAspectRatio="none"/>`);
@@ -944,7 +1084,7 @@ function isInside(id, ancestorId) {
 }
 
 /* ----- Lịch sử thao tác ----- */
-const snap = () => JSON.stringify({ root: S.map.root, relations: S.map.relations, layout: S.map.layout, theme: S.map.theme });
+const snap = () => JSON.stringify({ root: S.map.root, relations: S.map.relations, layout: S.map.layout, theme: S.map.theme, sketch: !!S.map.sketch });
 function pushHist(s = snap()) { S.undo.push(s); if (S.undo.length > 200) S.undo.shift(); S.redo.length = 0; }
 function restore(s) {
   Object.assign(S.map, JSON.parse(s)); reindex();
@@ -1012,19 +1152,21 @@ function renderNodes(L, pf) {
   for (const b of L.boxes.values()) {
     const n = b.node;
     const cls = ['node', 's-' + b.shape];
+    const drawn = b.path || b.upath;
+    if (drawn) cls.push('s-path');
     if (b.id === S.sel) cls.push('sel');
     if (b.id === S.editing) cls.push('editing');
     if (S.matches?.has(b.id)) cls.push('match');
     if (pf?.has(b.id)) cls.push('pf');
     if (S.quiz && !S.quiz.shown.has(b.id)) cls.push('hid');
-    const shadow = b.shape === 'underline' ? `inset 0 -${b.ul}px 0 ${b.color}` : b.stroke ? `inset 0 0 0 2px ${b.stroke}` : 'none';
+    const shadow = drawn ? 'none' : b.shape === 'underline' ? `inset 0 -${b.ul}px 0 ${b.color}` : b.stroke ? `inset 0 0 0 2px ${b.stroke}` : 'none';
     const style = `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;padding:${b.padT}px ${b.padX}px ${b.padB}px ${b.padL}px;` +
-      `background:${b.fill};color:${b.text};font:${b.font};line-height:${b.lh}px;border-radius:${radiusOf(b)}px;box-shadow:${shadow};--c:${b.color}`;
-    let inner = '';
+      `background:${drawn ? 'transparent' : b.fill};color:${b.text};font:${b.font};line-height:${b.lh}px;border-radius:${drawn ? 0 : radiusOf(b)}px;box-shadow:${shadow};--c:${b.color}`;
+    let inner = drawn ? `<svg class="nshape" width="${b.w}" height="${b.h}">${nodeShapeSVG(b)}</svg>` : '';
     if (n.image) inner += `<img class="nimg" src="${n.image.src}" alt="" draggable="false" style="left:${b.imgX}px;top:${b.imgY}px;width:${b.imgW}px;height:${b.imgH}px">`;
     if (n.icon) inner += `<span class="ic" style="width:${b.iconW}px;font-size:${b.fs}px">${esc(n.icon)}</span>`;
     inner += b.mlines
-      ? `<svg class="tx" width="${b.textW}" height="${b.textH}" style="overflow:visible;font-family:${FONT}">${mathBlockSVG(b)}</svg>`
+      ? `<svg class="tx" width="${b.textW}" height="${b.textH}" style="overflow:visible;font-family:${L.font}">${mathBlockSVG(b)}</svg>`
       : `<span class="tx">${esc(b.lines.join('\n'))}</span>`;
     if (b.indW) {
       inner += '<span class="inds">' +
@@ -1596,7 +1738,7 @@ const swatches = (key, list, cur, { none = false, custom = true } = {}) =>
 
 function nodePanel() {
   const n = getNode(S.sel), b = S.L.boxes.get(S.sel), st = n.style || {};
-  const shapes = [['', 'Mặc định'], ['rounded', 'Bo góc'], ['rect', 'Vuông'], ['pill', 'Viên thuốc'], ['underline', 'Gạch chân'], ['none', 'Chỉ chữ']];
+  const shapes = [['', 'Mặc định'], ['rounded', 'Bo góc'], ['rect', 'Vuông'], ['pill', 'Viên thuốc'], ['ellipse', 'Bầu dục'], ['cloud', 'Đám mây'], ['hexagon', 'Lục giác'], ['underline', 'Gạch chân'], ['none', 'Chỉ chữ']];
   const bold = b ? /^(italic )?(\d+)/.exec(b.font)[2] >= 600 : false;
   return `
   <div class="pn-sec"><div class="pn-label">Ghi chú</div><textarea id="pn-note" class="field" rows="3" placeholder="Thêm ghi chú cho nút…">${esc(n.note || '')}</textarea></div>
@@ -1658,6 +1800,13 @@ function mapPanel() {
         <i style="left:38%;width:24%;height:12px;margin-top:-6px;border-radius:4px;background:${t.root.fill === 'transparent' ? 'none' : t.root.fill};box-shadow:inset 0 0 0 1.5px ${t.root.stroke || t.root.fill}"></i>
         ${t.palette.slice(0, 4).map((c, i) => `<i style="background:${c};left:${[10, 17, 72, 79][i]}%;top:${[30, 70, 30, 70][i]}%"></i>`).join('')}
       </span>${t.name}</button>`).join('')}
+  </div></div>
+  <div class="pn-sec"><div class="pn-label">Kiểu nét</div><div class="seg" style="grid-template-columns:1fr 1fr">
+    <button class="${S.map.sketch ? '' : 'on'}" data-act="sketch" data-val="">Gọn gàng</button>
+    <button class="${S.map.sketch ? 'on' : ''}" data-act="sketch" data-val="1" style="font-family:${SKETCH_FONT}">✏️ Vẽ tay</button>
+  </div></div>
+  <div class="pn-sec"><div class="pn-label">Giao diện ứng dụng</div><div class="seg" style="grid-template-columns:repeat(3,1fr)">
+    ${[['light', 'Sáng'], ['dark', 'Tối'], ['', 'Theo máy']].map(([v, l]) => `<button class="${UI.mode() === v ? 'on' : ''}" data-act="ui-mode" data-val="${v}">${l}</button>`).join('')}
   </div></div>
   <div class="pn-sec"><div class="pn-label">Thống kê</div><div class="stats">
     <div><b>${n}</b><span>nút</span></div><div><b>${depth}</b><span>cấp sâu</span></div><div><b>${S.map.relations.length}</b><span>mối nối</span></div></div></div>
@@ -3022,6 +3171,7 @@ async function packMap(map) {
   };
   const data = { v: 1, title: map.title, theme: map.theme, layout: map.layout, root: strip(map.root), relations: map.relations };
   if (map.quiz?.questions?.length) data.quiz = map.quiz;
+  if (map.sketch) data.sketch = true;
   const stream = new Blob([JSON.stringify(data)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   return { code: b64url(new Uint8Array(await new Response(stream).arrayBuffer())), images, files };
 }
@@ -3079,6 +3229,7 @@ async function openShared(mode, code) {
     relations: (data.relations || []).filter(r => ids.has(r.from) && ids.has(r.to)).map(r => ({ id: r.id || uid(), from: r.from, to: r.to, label: r.label || '' })),
   });
   if (data.quiz?.questions?.length) map.quiz = data.quiz;
+  if (data.sketch) map.sketch = true;
   showMap(map, { temp: true });
   saveNow();
   if (quizDepth) startQuiz(quizDepth);
@@ -3242,6 +3393,9 @@ const ACTIONS = {
   italic: () => { const n = getNode(S.sel); if (n) setStyle('italic', n.style?.italic ? '' : true); },
   layout: el => { commit(() => { S.map.layout = el.dataset.val; if (el.dataset.val === 'map') assignSides(S.map.root); }); fitAll(); },
   theme: el => commit(() => { S.map.theme = el.dataset.val; }),
+  sketch: el => { commit(() => { if (el.dataset.val) S.map.sketch = true; else delete S.map.sketch; }); fitAll(); },
+  'ui-mode': el => { UI.set(el.dataset.val); if (S.map) render(); },
+  'ui-toggle': () => { const next = UI.dark() ? 'light' : 'dark'; UI.set(next); toast(next === 'dark' ? 'Giao diện tối' : 'Giao diện sáng'); },
   'expand-all': () => setCollapsedAll(false),
   'collapse-all': () => setCollapsedAll(true),
   'del-rel': () => commit(() => { S.map.relations = S.map.relations.filter(r => r.id !== S.selRel); S.selRel = null; }),
@@ -3393,6 +3547,7 @@ $('#file-input').addEventListener('change', async e => {
       const ids = new Set(); walk(root, n => { ids.add(n.id); });
       map.relations = (o.relations || []).filter(r => ids.has(r.from) && ids.has(r.to)).map(r => ({ id: r.id || uid(), from: r.from, to: r.to, label: r.label || '' }));
       if (o.quiz?.questions?.length) map.quiz = o.quiz;
+      if (o.sketch) map.sketch = true;
     } else if (/\.(mm|opml|xml)$/i.test(f.name)) {
       const root = parseXmlTree(text);
       if (root) map = newMap(root, root.text);
@@ -3483,6 +3638,21 @@ async function installApp() {
   installPrompt = null; $('[data-act="install-app"]').hidden = true;
 }
 window.addEventListener('offline', () => toast('Mất kết nối mạng — vẫn vẽ sơ đồ bình thường, riêng AI và chia sẻ cần mạng.', 4000));
+
+/* ---------------- Giao diện sáng / tối của ứng dụng (sơ đồ giữ chủ đề màu riêng) ---------------- */
+const UI = {
+  mode() { try { return localStorage.getItem('sodo.ui') || ''; } catch { return ''; } },
+  dark() { const m = this.mode(); return m ? m === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; },
+  set(m) { try { if (m) localStorage.setItem('sodo.ui', m); else localStorage.removeItem('sodo.ui'); } catch {} this.apply(); },
+  apply() {
+    const m = this.mode();
+    if (m) document.documentElement.dataset.ui = m; else delete document.documentElement.dataset.ui;
+    $('meta[name="theme-color"]')?.setAttribute('content', this.dark() ? '#12151c' : '#ffffff');
+    if (S.map && S.panelTab === 'map' && !$('#editor').hidden) renderPanel?.();
+  },
+};
+UI.apply();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => UI.apply());
 
 /* ---------------- Khởi động ---------------- */
 (async function boot() {

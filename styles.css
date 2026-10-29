@@ -15,6 +15,23 @@
   --radius: 10px;
   --shadow: 0 1px 2px rgba(20, 28, 45, .06), 0 4px 16px rgba(20, 28, 45, .06);
   --shadow-lg: 0 12px 40px rgba(20, 28, 45, .18);
+  --float: rgba(255, 255, 255, .95);
+  color-scheme: light;
+}
+/* Giao diện tối: chọn tay (data-ui="dark") hoặc theo máy khi chưa chọn */
+:root[data-ui="dark"] {
+  --bg: #12151c; --surface: #1b1f29; --surface-2: #232835; --line: #2c3240; --line-2: #3b4253;
+  --ink: #e8ebf1; --ink-2: #b6bdca; --muted: #828a9c; --accent: #7c74ff; --accent-2: #2a2852; --danger: #f0566a; --sel: #5b9bff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 4px 16px rgba(0, 0, 0, .3); --shadow-lg: 0 12px 40px rgba(0, 0, 0, .55);
+  --float: rgba(27, 31, 41, .95); color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-ui]) {
+    --bg: #12151c; --surface: #1b1f29; --surface-2: #232835; --line: #2c3240; --line-2: #3b4253;
+    --ink: #e8ebf1; --ink-2: #b6bdca; --muted: #828a9c; --accent: #7c74ff; --accent-2: #2a2852; --danger: #f0566a; --sel: #5b9bff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 4px 16px rgba(0, 0, 0, .3); --shadow-lg: 0 12px 40px rgba(0, 0, 0, .55);
+    --float: rgba(27, 31, 41, .95); color-scheme: dark;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -41,7 +58,7 @@ svg.i { width: 18px; height: 18px; flex: none; }
   background: var(--surface); font-weight: 500;
   transition: background .15s, border-color .15s;
 }
-.btn:hover { background: var(--surface-2); border-color: #c3c9d6; }
+.btn:hover { background: var(--surface-2); border-color: var(--line-2); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { background: #4338ca; }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
@@ -96,7 +113,7 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; width: 100%
 .card:hover .acts, .card:focus-within .acts { opacity: 1; }
 .card .acts button {
   width: 30px; height: 30px; display: grid; place-items: center; border: none; border-radius: 8px;
-  background: rgba(255,255,255,.95); box-shadow: var(--shadow); color: var(--ink-2);
+  background: var(--float); box-shadow: var(--shadow); color: var(--ink-2);
 }
 .card .acts button:hover { color: var(--accent); }
 .card .acts button.del:hover { color: var(--danger); }
@@ -264,7 +281,7 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; width: 100%
 .sw {
   width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(0,0,0,.12); padding: 0; position: relative;
 }
-.sw.on { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--sel); }
+.sw.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--sel); }
 .sw.none { background: linear-gradient(135deg, #fff 45%, #e03131 45%, #e03131 55%, #fff 55%); }
 .sw.custom { overflow: hidden; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
 .sw.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
@@ -285,7 +302,7 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; width: 100%
 .emoji-grid button.on { background: var(--accent-2); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .pn-sec .field { width: 100%; }
 .acts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.acts-grid .btn { height: 34px; padding: 0 10px; font-size: 13px; justify-content: flex-start; }
+.acts-grid .btn { height: 34px; padding: 0 10px; font-size: 13px; justify-content: flex-start; white-space: nowrap; overflow: hidden; }
 .acts-grid .btn svg.i { width: 16px; height: 16px; }
 .acts-grid .btn.del { color: var(--danger); }
 
@@ -451,3 +468,8 @@ kbd {
 @media (max-width: 1420px) {
   .tbtn[data-act="add-child"] .lbl, .tbtn[data-act="add-sibling"] .lbl, .tbtn[data-act="relate"] .lbl, .tb .drive-btn .lbl { display: none; }
 }
+
+/* ---------- Hình nút vẽ bằng path (bầu dục, đám mây, lục giác, nét vẽ tay) ---------- */
+.node.s-path { isolation: isolate; }
+.node .nshape { position: absolute; left: 0; top: 0; z-index: -1; overflow: visible; pointer-events: none; }
+.btn.icon-only { padding-left: 9px; padding-right: 9px; }

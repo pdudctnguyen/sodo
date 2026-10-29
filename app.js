@@ -2574,6 +2574,7 @@ const LIBS = {
   pdf: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs',
   pdfWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs',
   mammoth: 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js',
+  pptx: 'https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js',
 };
 const loadScript = src => new Promise((res, rej) => {
   if ([...document.scripts].some(s => s.src === src)) return res();
@@ -2827,6 +2828,98 @@ async function printMap() {
   w.document.close();
 }
 
+/** Xuất PowerPoint: slide tiêu đề, slide toàn cảnh sơ đồ, rồi mỗi nhánh chính một slide (dài thì sang slide "tiếp"). */
+async function exportPPTX() {
+  const map = S.map, L = computeLayout(map), th = L.theme;
+  toast('Đang tạo PowerPoint…');
+  try { await loadScript(LIBS.pptx); } catch (e) { toast(e.message); return; }
+  await preloadImages(map);
+  const W = 13.333, H = 7.5, FONT_P = 'Arial';
+  const hex = c => (/^#[0-9a-f]{6}$/i.test(c || '') ? c.slice(1) : null);
+  const plain = t => String(t || '').replace(/\$([^$\n]+?)\$/g, '$1').replace(/\s*\n\s*/g, ' ').trim();
+  const label = n => (n.icon ? n.icon + ' ' : '') + plain(n.text);
+  const imgData = src => (src.startsWith('data:') ? { data: src.slice(5) } : { path: src });
+  const bg = hex(th.bg) || 'FFFFFF', ink = hex(th.text) || '1F2937', muted = hex(th.rel) || '5B6478';
+  const notesOf = nodes => nodes.filter(n => n.note).map(n => `${plain(n.text)}: ${n.note}`).join('\n\n');
+
+  const pptx = new PptxGenJS();
+  pptx.layout = 'LAYOUT_WIDE';
+  pptx.title = map.title;
+
+  // Slide tiêu đề theo màu nút trung tâm
+  const r = map.root, rootFill = hex(th.root.fill) || bg, rootInk = hex(th.root.text) || ink;
+  const s1 = pptx.addSlide();
+  s1.background = { color: rootFill };
+  s1.addText(label(r), { x: 0.8, y: 2.3, w: W - 1.6, h: 1.8, fontFace: FONT_P, fontSize: 44, bold: true, color: rootInk, align: 'center', valign: 'middle', fit: 'shrink' });
+  const sub = map.title && plain(map.title) !== plain(r.text) ? plain(map.title) : `${r.children.length} nội dung chính`;
+  s1.addText(sub, { x: 0.8, y: 4.2, w: W - 1.6, h: 0.6, fontFace: FONT_P, fontSize: 20, color: rootInk, align: 'center', transparency: 20 });
+  if (r.note) s1.addNotes(r.note);
+
+  // Slide toàn cảnh: ảnh cả sơ đồ, căn giữa và giữ tỉ lệ
+  const cv = renderCanvas(map, { scale: 2 });
+  const k = Math.min((W - 0.6) / cv.width, (H - 0.6) / cv.height);
+  const s2 = pptx.addSlide();
+  s2.background = { color: bg };
+  s2.addImage({ data: cv.toDataURL('image/png').slice(5), x: (W - cv.width * k) / 2, y: (H - cv.height * k) / 2, w: cv.width * k, h: cv.height * k });
+
+  for (const br of r.children) {
+    const color = hex(L.boxes.get(br.id)?.color) || hex(th.palette[0]) || '4F46E5';
+    const rows = [];
+    const rec = (n, d) => { rows.push({ n, d }); n.children.forEach(c => rec(c, d + 1)); };
+    br.children.forEach(c => rec(c, 0));
+    // Chia trang theo ước lượng số dòng (chữ cấp sâu nhỏ hơn và thụt vào)
+    const paginate = bw => {
+      const cpl = d => Math.max(24, Math.round(bw * (d === 0 ? 7.2 : d === 1 ? 8.4 : 9.4)) - d * 6);
+      const pages = [[]];
+      let used = 0;
+      for (const row of rows) {
+        const u = Math.ceil(Math.max(1, label(row.n).length) / cpl(row.d)) * (row.d === 0 ? 1.25 : 1);
+        if (used + u > 12 && pages.at(-1).length) { pages.push([]); used = 0; }
+        pages.at(-1).push(row); used += u;
+      }
+      return pages;
+    };
+    // Nhánh ngắn: chữ bên trái, bên phải là ảnh nhánh (ảnh của nút, nếu không có thì vẽ sơ đồ nhỏ của nhánh)
+    let img = br.image, bodyW = W - 1.6, pages = paginate(bodyW);
+    if (img || (rows.length && pages.length === 1)) {
+      const half = paginate(6.4);
+      if (half.length === 1) {
+        bodyW = 6.4; pages = half;
+        if (!img) {
+          const sub = renderCanvas({ ...map, root: { ...br, side: undefined, style: undefined, children: br.children.map(c => ({ ...c, style: { color: '#' + color, ...c.style } })) }, relations: [], layout: map.layout === 'down' ? 'down' : 'right' }, { scale: 2, pad: 24 });
+          img = { src: sub.toDataURL('image/png'), w: sub.width, h: sub.height };
+        }
+      } else img = null;
+    }
+    pages.forEach((page, pi) => {
+      const sl = pptx.addSlide();
+      sl.background = { color: bg };
+      sl.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.18, h: H, fill: { color }, line: { color } });
+      sl.addText(label(br) + (pi ? ' (tiếp)' : ''), { x: 0.8, y: 0.4, w: W - 1.6, h: 1, fontFace: FONT_P, fontSize: 32, bold: true, color, valign: 'middle', fit: 'shrink' });
+      if (page.length) {
+        sl.addText(page.map(({ n, d }) => {
+          const o = { bullet: d === 0 ? true : { code: d === 1 ? '2013' : '25E6' }, indentLevel: d, fontSize: d === 0 ? 22 : d === 1 ? 18 : 16, bold: d === 0 && n.children.length > 0, color: d === 0 ? ink : muted, paraSpaceBefore: d === 0 ? 8 : 2 };
+          const link = n.links?.[0];
+          return link
+            ? { text: label(n) + ' ↗', options: { ...o, hyperlink: { url: link.url, tooltip: linkLabel(link) }, breakLine: true } }
+            : { text: label(n), options: { ...o, breakLine: true } };
+        }), { x: 0.8, y: 1.6, w: bodyW, h: H - 2.1, fontFace: FONT_P, valign: 'top', fit: 'shrink' });
+      } else if (br.note) {
+        sl.addText(br.note, { x: 0.8, y: 1.6, w: bodyW, h: H - 2.1, fontFace: FONT_P, fontSize: 20, color: ink, valign: 'top', fit: 'shrink' });
+      }
+      if (img && pi === 0) {
+        const kk = Math.min(5.3 / img.w, 5.2 / img.h);
+        sl.addImage({ ...imgData(img.src), x: W - 0.5 - (5.3 + img.w * kk) / 2, y: 1.6 + (5.2 - img.h * kk) / 2, w: img.w * kk, h: img.h * kk });
+      }
+      const notes = notesOf(pi ? page.map(x => x.n) : [br, ...page.map(x => x.n)]);
+      if (notes) sl.addNotes(notes);
+    });
+  }
+  const blob = await pptx.write({ outputType: 'blob' });
+  download(safeName(map.title) + '.pptx', blob);
+  toast('Đã xuất PowerPoint');
+}
+
 /* =====================================================================
    ĐIỀU PHỐI SỰ KIỆN data-act
    ===================================================================== */
@@ -2873,6 +2966,7 @@ const ACTIONS = {
   'del-rel': () => commit(() => { S.map.relations = S.map.relations.filter(r => r.id !== S.selRel); S.selRel = null; }),
   'flip-rel': () => commit(() => { const r = S.map.relations.find(x => x.id === S.selRel); if (r) [r.from, r.to] = [r.to, r.from]; }),
   'export-png': exportPNG,
+  'export-pptx': exportPPTX,
   'export-svg': () => download(safeName(S.map.title) + '.svg', renderSVG(S.map), 'image/svg+xml'),
   'export-md': () => download(safeName(S.map.title) + '.md', toMarkdown(S.map.root), 'text/markdown'),
   'export-mm': () => download(safeName(S.map.title) + '.mm', toFreeMind(S.map.root), 'application/xml'),

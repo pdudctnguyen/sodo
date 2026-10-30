@@ -2,7 +2,7 @@
 
 Ứng dụng vẽ sơ đồ tư duy chạy hoàn toàn trên trình duyệt (HTML/CSS/JS thuần, không cần build).
 
-- Bố cục: sơ đồ tư duy, sang phải/trái, sơ đồ tổ chức, cây thư mục, trục thời gian, xương cá (nguyên nhân – kết quả)
+- 13 bố cục: sơ đồ tư duy, sang phải/trái, sơ đồ logic (gấp khúc), ngoặc nhọn, bảng cột, tỏa tròn, sơ đồ tổ chức (xuôi / ngược), cây thư mục, trục thời gian (ngang / dọc), xương cá
 - Màu, hình dạng (bo góc, viên thuốc, bầu dục, đám mây, lục giác…), biểu tượng, ghi chú, liên kết, ảnh, mối nối
 - Kiểu nét "vẽ tay" (nét bút chì + chữ viết tay) và giao diện ứng dụng sáng / tối
 - Dàn ý, tìm kiếm, trình chiếu, chế độ ôn tập

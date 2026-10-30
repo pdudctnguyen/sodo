@@ -135,6 +135,12 @@ const LAYOUTS = {
   left: { name: 'Sang trái', svg: '<rect x="68" y="17" width="24" height="10" rx="3" fill="currentColor"/><path d="M68 22c-10 0-10-16-22-16M68 22H46M68 22c-10 0-10 16-22 16" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 6h22M20 22h22M20 38h22" stroke="currentColor" stroke-width="3"/>' },
   down: { name: 'Sơ đồ tổ chức', svg: '<rect x="38" y="3" width="24" height="10" rx="3" fill="currentColor"/><path d="M50 13v8M20 21h60M20 21v6M50 21v6M80 21v6" stroke="currentColor" stroke-width="2" fill="none"/><rect x="10" y="29" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="40" y="29" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="70" y="29" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>' },
   tree: { name: 'Cây thư mục', svg: '<rect x="24" y="3" width="26" height="9" rx="3" fill="currentColor"/><path d="M30 12v26M30 20h10M30 29h10M30 38h10" stroke="currentColor" stroke-width="2" fill="none"/><path d="M44 20h28M44 29h22M44 38h30" stroke="currentColor" stroke-width="3"/>' },
+  logic: { name: 'Sơ đồ logic', svg: '<rect x="6" y="17" width="22" height="10" rx="3" fill="currentColor"/><path d="M28 22h10M38 8v28M38 8h12M38 22h12M38 36h12" stroke="currentColor" stroke-width="2" fill="none"/><path d="M54 8h30M54 22h22M54 36h28" stroke="currentColor" stroke-width="3"/>' },
+  brace: { name: 'Ngoặc nhọn', svg: '<rect x="4" y="17" width="22" height="10" rx="3" fill="currentColor"/><path d="M40 4q-6 0-6 5v8q0 5-6 5q6 0 6 5v8q0 5 6 5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M46 8h34M46 22h28M46 36h36" stroke="currentColor" stroke-width="3"/>' },
+  matrix: { name: 'Bảng cột', svg: '<rect x="38" y="2" width="24" height="9" rx="3" fill="currentColor"/><rect x="8" y="16" width="24" height="7" rx="2" fill="currentColor"/><rect x="38" y="16" width="24" height="7" rx="2" fill="currentColor"/><rect x="68" y="16" width="24" height="7" rx="2" fill="currentColor"/><path d="M12 29h18M12 37h13M42 29h17M42 37h15M72 29h15M72 37h18" stroke="currentColor" stroke-width="2.5"/>' },
+  radial: { name: 'Tỏa tròn', svg: '<rect x="40" y="18" width="20" height="8" rx="3" fill="currentColor"/><path d="M50 18V8M50 26v10M40 22H24M60 22h16M43 18l-9-8M57 18l9-8M43 26l-9 8M57 26l9 8" stroke="currentColor" stroke-width="2"/><g fill="currentColor"><circle cx="50" cy="5" r="3"/><circle cx="50" cy="39" r="3"/><circle cx="20" cy="22" r="3"/><circle cx="80" cy="22" r="3"/><circle cx="31" cy="8" r="3"/><circle cx="69" cy="8" r="3"/><circle cx="31" cy="36" r="3"/><circle cx="69" cy="36" r="3"/></g>' },
+  vtimeline: { name: 'Thời gian dọc', svg: '<rect x="40" y="1" width="20" height="8" rx="3" fill="currentColor"/><path d="M50 9v31M47 36l3 5 3-5" stroke="currentColor" stroke-width="2" fill="none"/><rect x="45" y="14" width="10" height="6" rx="2" fill="currentColor"/><rect x="45" y="27" width="10" height="6" rx="2" fill="currentColor"/><path d="M55 17h8M45 30h-8" stroke="currentColor" stroke-width="2"/><path d="M64 17h22M36 30H14" stroke="currentColor" stroke-width="3"/>' },
+  up: { name: 'Tổ chức ngược', svg: '<rect x="38" y="31" width="24" height="10" rx="3" fill="currentColor"/><path d="M50 31v-8M20 23h60M20 23v-6M50 23v-6M80 23v-6" stroke="currentColor" stroke-width="2" fill="none"/><rect x="10" y="6" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="40" y="6" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="70" y="6" width="20" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>' },
   timeline: { name: 'Trục thời gian', svg: '<rect x="2" y="17" width="18" height="10" rx="3" fill="currentColor"/><path d="M20 22h74M88 17l6 5-6 5M33 18V7h14M55 26v11h14M77 18V7h12" stroke="currentColor" stroke-width="2" fill="none"/><rect x="27" y="18" width="13" height="8" rx="2" fill="currentColor"/><rect x="49" y="18" width="13" height="8" rx="2" fill="currentColor"/><rect x="71" y="18" width="13" height="8" rx="2" fill="currentColor"/>' },
   fishbone: { name: 'Xương cá', svg: '<rect x="76" y="16" width="22" height="12" rx="3" fill="currentColor"/><path d="M76 22H4M68 22 58 5M46 22 36 5M24 22 14 5M68 22 58 39M46 22 36 39M24 22 14 39M50 12h11M28 12h11M50 32h11M28 32h11" stroke="currentColor" stroke-width="2" fill="none"/>' },
 };
@@ -370,6 +376,37 @@ const TEMPLATES = [
     Thư viện – Thiết bị
   Đoàn – Đội
     Ban chấp hành Đoàn` },
+  {
+    id: 'plant', name: 'Cấu tạo cây xanh', layout: 'brace', theme: 'fresh', text: `Cây xanh
+  Rễ
+    Hút nước và muối khoáng
+    Giữ cây đứng vững
+  Thân
+    Vận chuyển nước và chất dinh dưỡng
+    Nâng đỡ tán lá
+  Lá
+    Quang hợp tạo chất hữu cơ
+    Thoát hơi nước
+  Hoa
+    Cơ quan sinh sản
+  Quả
+    Chứa và bảo vệ hạt
+  Hạt
+    Nảy mầm thành cây mới` },
+  {
+    id: 'states', name: 'Bảng so sánh', layout: 'matrix', theme: 'ocean', text: `Ba thể của chất
+  Thể rắn
+    Có hình dạng xác định
+    Có thể tích xác định
+    Các hạt xếp khít, chỉ dao động tại chỗ
+  Thể lỏng
+    Có hình dạng của vật chứa
+    Có thể tích xác định
+    Các hạt ở gần nhau, trượt lên nhau
+  Thể khí
+    Có hình dạng của vật chứa
+    Chiếm toàn bộ thể tích vật chứa
+    Các hạt ở xa nhau, chuyển động hỗn loạn` },
   {
     id: 'timeline', name: 'Dòng thời gian', layout: 'timeline', theme: 'fresh', text: `Việt Nam 1930 – 1975
   1930
@@ -665,6 +702,14 @@ function roughen(d, seed, amp, closed = false) {
   roughCache.set(key, res);
   return res;
 }
+/** Đường gấp khúc vuông góc bo góc: đi ngang tới xm, dọc tới y2, rồi ngang tới x2. */
+function elbowPath(x1, y1, xm, x2, y2, r = 7) {
+  const dy = y2 - y1;
+  if (Math.abs(dy) < 1) return `M${x1},${y1} H${x2}`;
+  const rr = Math.min(r, Math.abs(dy) / 2, Math.abs(xm - x1) || r, Math.abs(x2 - xm) || r);
+  const s1 = Math.sign(xm - x1) || 1, s2 = Math.sign(x2 - xm) || 1, sy = Math.sign(dy);
+  return `M${x1},${y1} H${xm - s1 * rr} Q${xm},${y1} ${xm},${y1 + sy * rr} V${y2 - sy * rr} Q${xm},${y2} ${xm + s2 * rr},${y2} H${x2}`;
+}
 /** Đường cong nối nút cha A với nút con B đã bị kéo đi: ngang hay dọc tùy B nằm bên cạnh hay phía trên/dưới. */
 function connector(A, B) {
   const ca = A.x + A.w / 2, cb = B.x + B.w / 2, ma = A.y + A.h / 2, mb = B.y + B.h / 2;
@@ -716,7 +761,7 @@ function computeLayout(map) {
     const st = n.style || {};
     const color = depth === 0 ? (st.color || theme.root.line)
       : (st.color || (depth === 1 ? theme.palette[idx % theme.palette.length] : branch));
-    const shape = st.shape || (depth <= 1 ? 'rounded' : mode === 'down' ? 'rounded' : theme.deep);
+    const shape = st.shape || (depth <= 1 ? 'rounded' : ['down', 'up', 'matrix', 'radial'].includes(mode) ? 'rounded' : mode === 'brace' ? 'none' : theme.deep);
     const boxed = shape !== 'underline' && shape !== 'none';
     let fill = 'transparent', stroke = null, text = theme.text;
     if (depth === 0) { fill = theme.root.fill; stroke = theme.root.stroke || null; text = theme.root.text; }
@@ -787,6 +832,19 @@ function computeLayout(map) {
   const treeH = b => (b.kids.length ? b.h + 12 + b.kids.reduce((a, k) => a + treeH(k) + 10, -10) : b.h);
   const treeW = b => Math.max(b.w, ...b.kids.map(k => treeIn(b) + treeW(k)));
   const extentOf = (b, f, a0) => b.kids.reduce((a, k) => extentOf(k, f, a), f(a0, b));
+  // Như treePlace nhưng lật sang trái: nút neo mép phải, con thụt vào bên trái
+  const treePlaceR = (b, right, top) => {
+    b.dir = 'treeR'; b.x = right - b.w; b.y = top;
+    let cy = top + b.h + 12;
+    const x0 = b.x + b.w - Math.min(18, b.w / 2), y0 = b.y + b.h;
+    for (const k of b.kids) {
+      const hk = treePlaceR(k, right - treeIn(b), cy);
+      const ky = anchorY(k), r = Math.min(8, ky - y0);
+      edge(b, k, `M${x0},${y0} V${ky - r} Q${x0},${ky} ${x0 - r},${ky} H${k.x + k.w}`);
+      cy += hk + 10;
+    }
+    return b.kids.length ? cy - 10 - top : b.h;
+  };
   const treePlace = (b, left, top) => {
     b.dir = 'tree'; b.x = left; b.y = top;
     let cy = top + b.h + 12;
@@ -800,7 +858,7 @@ function computeLayout(map) {
     return b.kids.length ? cy - 10 - top : b.h;
   };
 
-  if (mode === 'down') {
+  if (mode === 'down' || mode === 'up') {
     const HG = d => (d === 0 ? 40 : 22), VG = d => (d === 0 ? 64 : 46);
     const measure = b => {
       if (!b.kids.length) return (b.sw = b.w);
@@ -821,6 +879,94 @@ function computeLayout(map) {
       }
     };
     measure(root); place(root, -root.sw / 2, -root.h / 2);
+    if (mode === 'up') {
+      // Sơ đồ tổ chức ngược: lật theo chiều dọc, gốc nằm dưới cùng
+      for (const b of boxes.values()) { b.y = -b.y - b.h; b.dir = 'up'; }
+      edges.length = 0;
+      for (const b of boxes.values()) for (const k of b.kids) {
+        const px = b.x + b.w / 2, py = b.y, qx = k.x + k.w / 2, qy = k.y + k.h, my = (py + qy) / 2;
+        edge(b, k, `M${px},${py} C${px},${my} ${qx},${my} ${qx},${qy}`);
+      }
+    }
+  } else if (mode === 'matrix') {
+    // Bảng cột: nhánh chính là tiêu đề cột xếp hàng ngang, ý con xếp dọc trong cột
+    root.dir = 'down'; root.x = -root.w / 2; root.y = -root.h / 2;
+    const widths = root.kids.map(k => Math.max(k.w, ...k.kids.map(c => 22 + treeW(c)))), gap = 28;
+    let x = -(widths.reduce((a, w) => a + w, 0) + gap * Math.max(0, widths.length - 1)) / 2;
+    const hy = root.y + root.h + 56;
+    root.kids.forEach((k, i) => {
+      k.dir = 'tree'; k.x = x; k.y = hy;
+      const px = root.x + root.w / 2, py = root.y + root.h, qx = k.x + k.w / 2, my = (py + hy) / 2;
+      edge(root, k, `M${px},${py} C${px},${my} ${qx},${my} ${qx},${hy}`);
+      let cy = k.y + k.h + 14;
+      const x0 = k.x + Math.min(18, k.w / 2), y0 = k.y + k.h;
+      for (const c of k.kids) {
+        const hc = treePlace(c, x + 22, cy), ky = anchorY(c), r = Math.min(8, ky - y0);
+        edge(k, c, `M${x0},${y0} V${ky - r} Q${x0},${ky} ${x0 + r},${ky} H${c.x}`);
+        cy += hc + 10;
+      }
+      x += widths[i] + gap;
+    });
+  } else if (mode === 'radial') {
+    // Tỏa tròn: mỗi nhánh chiếm một góc tỉ lệ với số ý lá; bán kính từng vòng đủ rộng để nút không chồng nhau
+    root.dir = 1; root.x = -root.w / 2; root.y = -root.h / 2;
+    const leaves = b => (b.kids.length ? b.kids.reduce((a, k) => a + leaves(k), 0) : 1);
+    const rings = [];
+    const assign = (b, a0, a1) => {
+      const total = leaves(b);
+      let a = a0;
+      for (const k of b.kids) {
+        const span = (a1 - a0) * leaves(k) / total;
+        k.ang = a + span / 2; k.dir = Math.cos(k.ang) >= -0.01 ? 1 : -1;
+        (rings[k.depth] ||= []).push(k);
+        assign(k, a, a + span); a += span;
+      }
+    };
+    assign(root, -Math.PI / 2, Math.PI * 1.5);
+    const tExt = b => Math.abs(Math.sin(b.ang)) * b.w + Math.abs(Math.cos(b.ang)) * b.h;
+    const rExt = b => Math.abs(Math.cos(b.ang)) * b.w + Math.abs(Math.sin(b.ang)) * b.h;
+    const R = [0];
+    for (let d = 1; d < rings.length; d++) {
+      const list = rings[d].slice().sort((p, q) => p.ang - q.ang);
+      let need = 0;
+      if (list.length > 1) list.forEach((A, i) => {
+        const B = list[(i + 1) % list.length];
+        const g = Math.min(Math.PI, i === list.length - 1 ? B.ang + Math.PI * 2 - A.ang : B.ang - A.ang);
+        need = Math.max(need, ((tExt(A) + tExt(B)) / 2 + 14) / (2 * Math.sin(Math.max(g, 0.01) / 2)));
+      });
+      const inner = d === 1 ? Math.hypot(root.w, root.h) / 2 + 60 : R[d - 1] + Math.max(...rings[d - 1].map(rExt)) / 2 + 36;
+      R[d] = Math.max(need, inner + Math.max(...list.map(rExt)) / 2);
+    }
+    const border = (b, tx, ty) => {
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2, dx = tx - cx, dy = ty - cy;
+      const k = Math.min(Math.abs(dx) > 0.01 ? b.w / 2 / Math.abs(dx) : Infinity, Math.abs(dy) > 0.01 ? b.h / 2 / Math.abs(dy) : Infinity);
+      return [cx + dx * k, cy + dy * k];
+    };
+    for (let d = 1; d < rings.length; d++) for (const b of rings[d]) { b.x = Math.cos(b.ang) * R[d] - b.w / 2; b.y = Math.sin(b.ang) * R[d] - b.h / 2; }
+    for (const b of boxes.values()) for (const k of b.kids) {
+      const [ax, ay] = border(b, k.x + k.w / 2, k.y + k.h / 2), [bx, by] = border(k, b.x + b.w / 2, b.y + b.h / 2);
+      edge(b, k, `M${ax},${ay} L${bx},${by}`);
+    }
+  } else if (mode === 'vtimeline') {
+    // Trục thời gian dọc: mốc nằm trên trục, ý con treo xen kẽ bên phải / bên trái
+    root.dir = 'down'; root.x = -root.w / 2; root.y = -root.h / 2;
+    const axis = { color: root.color, w: 3 }, half = Math.max(0, ...root.kids.map(k => k.w)) / 2;
+    let ay = root.y + root.h, y = ay + 36, prev = root;
+    root.kids.forEach((k, i) => {
+      const right = i % 2 === 0;
+      k.dir = right ? 1 : -1; k.x = -k.w / 2; k.y = y;
+      edges.push({ from: prev.id, to: k.id, d: `M0,${ay} V${k.y}`, ...axis });
+      let cy = y;
+      const sx = right ? k.x + k.w : k.x, km = k.y + k.h / 2, xm = right ? half + 16 : -half - 16;
+      for (const c of k.kids) {
+        const hc = right ? treePlace(c, half + 34, cy) : treePlaceR(c, -half - 34, cy);
+        edge(k, c, elbowPath(sx, km, xm, right ? c.x : c.x + c.w, anchorY(c)));
+        cy += hc + 10;
+      }
+      y = Math.max(k.y + k.h, cy - 10) + 30; ay = k.y + k.h; prev = k;
+    });
+    const end = ay + 44;
+    edges.push({ from: prev.id, to: prev.id, d: `M0,${ay} V${end} M-6,${end - 9} L0,${end} L6,${end - 9}`, ...axis });
   } else if (mode === 'tree') {
     treePlace(root, -root.w / 2, -root.h / 2);
   } else if (mode === 'timeline') {
@@ -897,13 +1043,23 @@ function computeLayout(map) {
       const px = dir > 0 ? p.x + p.w : p.x, py = anchorY(p);
       const qx = dir > 0 ? c.x : c.x + c.w, qy = anchorY(c);
       const mx = (px + qx) / 2;
-      edge(p, c, `M${px},${py} C${mx},${py} ${mx},${qy} ${qx},${qy}`);
+      // Sơ đồ logic: đường gấp khúc vuông góc, các con chung một "thân" gần nút cha
+      if (mode === 'logic') edge(p, c, elbowPath(px, py, px + dir * 18, qx, qy));
+      else if (mode !== 'brace') edge(p, c, `M${px},${py} C${mx},${py} ${mx},${qy} ${qx},${qy}`);
     };
     const placeGroup = (parent, kids, dir, top) => {
       const total = kids.reduce((a, k) => a + k.sh, 0) + VG(parent.depth) * (kids.length - 1);
       let cy = top - total / 2;
       const ex = dir > 0 ? parent.x + parent.w + HG(parent.depth) : parent.x - HG(parent.depth);
       for (const k of kids) { place(k, ex, cy, dir); hEdge(parent, k, dir); cy += k.sh + VG(parent.depth); }
+      if (mode === 'brace') {
+        // Một dấu ngoặc nhọn { ôm trọn các ý con, mũi nhọn chỉ vào nút cha
+        const t = Math.min(...kids.map(k => k.y)), bt = Math.max(...kids.map(k => k.y + k.h)), m = top;
+        const px = parent.x + parent.w, w = Math.max(4, Math.min(12, (bt - t) / 6)), tx = px + 8, bx = tx + w, ex2 = bx + w;
+        const d = bt - t < w * 4 ? `M${px},${anchorY(parent)} H${kids[0].x - 4}`
+          : `M${ex2},${t} Q${bx},${t} ${bx},${t + w} V${m - w} Q${bx},${m} ${tx},${m} Q${bx},${m} ${bx},${m + w} V${bt - w} Q${bx},${bt} ${ex2},${bt}`;
+        edges.push({ from: parent.id, to: kids[0].id, d, color: parent.color, w: parent.depth === 0 ? 2.6 : 2 });
+      }
     };
     const place = (b, ex, top, dir) => {
       b.dir = dir; b.x = dir > 0 ? ex : ex - b.w; b.y = top + (b.sh - b.h) / 2;
@@ -912,8 +1068,9 @@ function computeLayout(map) {
     root.x = -root.w / 2; root.y = -root.h / 2;
     root.dir = mode === 'left' ? -1 : 1;
     root.kids.forEach(measure);
-    const right = mode === 'left' ? [] : mode === 'right' ? root.kids : root.kids.filter(k => k.node.side !== 'left');
-    const left = mode === 'left' ? root.kids : mode === 'right' ? [] : root.kids.filter(k => k.node.side === 'left');
+    const oneSide = ['right', 'logic', 'brace'].includes(mode);
+    const right = mode === 'left' ? [] : oneSide ? root.kids : root.kids.filter(k => k.node.side !== 'left');
+    const left = mode === 'left' ? root.kids : oneSide ? [] : root.kids.filter(k => k.node.side === 'left');
     if (right.length) placeGroup(root, right, 1, 0);
     if (left.length) placeGroup(root, left, -1, 0);
   }
@@ -1185,6 +1342,7 @@ function togglePos(b) {
   if (b.dir === 'down') return [b.w / 2, b.h + 11];
   if (b.dir === 'tree') return [Math.min(18, b.w / 2), b.h + 11];
   if (b.dir === 'tree-up') return [Math.min(18, b.w / 2), -11];
+  if (b.dir === 'treeR') return [b.w - Math.min(18, b.w / 2), b.h + 11];
   if (b.dir === 'up') return [b.w / 2, -11];
   return b.dir > 0 ? [b.w + 11, ay] : [-11, ay];
 }
@@ -1498,17 +1656,20 @@ function navigate(key) {
     return list[list.indexOf(b) + d];
   };
   let t = null;
-  if (L.mode === 'down') {
-    if (key === 'ArrowDown') t = nearest(b.kids, cx);
-    else if (key === 'ArrowUp') t = b.parent;
+  if (L.mode === 'down' || L.mode === 'up') {
+    const toKids = L.mode === 'down' ? 'ArrowDown' : 'ArrowUp';
+    if (key === toKids) t = nearest(b.kids, cx);
+    else if (key === 'ArrowUp' || key === 'ArrowDown') t = b.parent;
     else t = sib(key === 'ArrowLeft' ? -1 : 1);
   } else if (L.mode === 'tree') {
     if (key === 'ArrowRight') t = b.kids[0];
     else if (key === 'ArrowLeft') t = b.parent;
-  } else if (L.mode === 'timeline' || L.mode === 'fishbone') {
-    // Mốc thời gian đi theo trục; các ý trong khối thụt lề đi lên/xuống như cây thư mục
+  } else if (['timeline', 'fishbone', 'matrix', 'vtimeline'].includes(L.mode)) {
+    // Mốc thời gian / cột đi theo trục; các ý trong khối thụt lề đi lên/xuống như cây thư mục
     const near = d => b.parent?.kids[b.parent.kids.indexOf(b) + d];
-    if (L.mode === 'timeline' && b.depth <= 1 && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+    if (L.mode === 'vtimeline' && b.depth <= 1 && (key === 'ArrowUp' || key === 'ArrowDown')) {
+      t = b.depth === 0 ? (key === 'ArrowDown' ? b.kids[0] : null) : near(key === 'ArrowUp' ? -1 : 1) || (key === 'ArrowUp' ? b.parent : null);
+    } else if ((L.mode === 'timeline' || L.mode === 'matrix') && b.depth <= 1 && (key === 'ArrowLeft' || key === 'ArrowRight')) {
       t = b.depth === 0 ? (key === 'ArrowRight' ? b.kids[0] : null) : near(key === 'ArrowLeft' ? -1 : 1) || (key === 'ArrowLeft' ? b.parent : null);
     } else if (b.depth >= 2 && (key === 'ArrowUp' || key === 'ArrowDown')) t = near(key === 'ArrowUp' ? -1 : 1);
     else if (b.depth >= 2 && key === 'ArrowRight') t = b.kids[0];
@@ -1673,7 +1834,7 @@ function onUp() {
   }
 }
 /** Anh em xếp theo hàng ngang (chèn trước/sau theo trục x) thay vì theo cột. */
-const rowSibs = (L, b) => L.mode === 'down' || (L.mode === 'timeline' && b.depth === 1);
+const rowSibs = (L, b) => L.mode === 'down' || L.mode === 'up' || ((L.mode === 'timeline' || L.mode === 'matrix') && b.depth === 1);
 function findDrop(p, skip) {
   const L = S.L;
   for (const b of L.boxes.values()) {

@@ -474,3 +474,10 @@ kbd {
 .node .nshape { position: absolute; left: 0; top: 0; z-index: -1; overflow: visible; pointer-events: none; }
 .btn.icon-only { padding-left: 9px; padding-right: 9px; }
 .canvas.moving { cursor: grabbing; }
+
+/* Ô kéo đổi kích thước nút */
+.rsz {
+  position: absolute; right: -7px; bottom: -7px; width: 12px; height: 12px; border-radius: 3px;
+  background: #fff; border: 2px solid var(--sel); cursor: nwse-resize; z-index: 3; touch-action: none;
+}
+.rsz.l { right: auto; left: -7px; cursor: nesw-resize; }

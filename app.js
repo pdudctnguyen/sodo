@@ -735,15 +735,17 @@ function computeLayout(map) {
     const lh = Math.round(fs * 1.35);
     const [padX0, padT, padB] = boxed ? (depth === 0 ? [24, 14, 14] : depth === 1 ? [16, 9, 9] : [12, 6, 6]) : [4, 3, 7];
     const padX = shape === 'pill' ? padX0 + 6 : padX0;
-    const maxW = depth === 0 ? 300 : 240;
+    const iconW = n.icon ? Math.round(fs * 1.25) + 4 : 0;
+    const nInd = (n.note ? 1 : 0) + (n.links?.length ? 1 : 0) + (n.files?.length ? 1 : 0);
+    const indW = nInd ? nInd * 18 + 4 : 0;
+    // Nút đã được kéo đổi bề rộng: chữ xuống dòng theo bề rộng đó (trừ phần hình bầu dục/đám mây ăn vào)
+    const shrink = { ellipse: 0.2, cloud: 0.3, hexagon: 0.12 }[shape] || 0;
+    const maxW = st.w ? Math.max(24, st.w * (1 - shrink) - padX * 2 - iconW - indW - 2) : depth === 0 ? 300 : 240;
     // Khi đang sửa chữ thì hiện dạng thô để ô nhập khớp vị trí; còn lại vẽ công thức
     const mlines = n.id !== S.editing && hasMath(n.text) ? mathLines(n.text, font, fs, lh, maxW) : null;
     const lines = mlines ? mlines.map(l => l.plain) : wrapText(n.text || '', font, maxW);
     const textW = Math.ceil(Math.max(depth === 0 ? 40 : 16, ...(mlines ? mlines.map(l => l.w) : lines.map(l => tw(l, font))))) + 2;
     const textH = mlines ? mlines.reduce((a, l) => a + l.h, 0) : lines.length * lh;
-    const iconW = n.icon ? Math.round(fs * 1.25) + 4 : 0;
-    const nInd = (n.note ? 1 : 0) + (n.links?.length ? 1 : 0) + (n.files?.length ? 1 : 0);
-    const indW = nInd ? nInd * 18 + 4 : 0;
     // Ảnh (nếu có) nằm phía trên dòng chữ; hàng chữ được căn giữa theo bề rộng ảnh
     const contentW = iconW + textW + indW;
     const imgW = n.image ? Math.min(n.image.dw || 200, n.image.w) : 0;
@@ -757,11 +759,15 @@ function computeLayout(map) {
     const [dx, dy] = shape === 'hexagon' ? [Math.round(h0 * 0.3), 0]
       : shape === 'ellipse' ? [Math.round(w0 * 0.1 + 4), Math.round(h0 * 0.16 + 2)]
       : shape === 'cloud' ? [Math.round(w0 * 0.14 + 8), Math.round(h0 * 0.25 + 6)] : [0, 0];
-    const w = w0 + 2 * dx, h = h0 + 2 * dy;
+    // Kích thước do người dùng kéo chỉ làm nút to ra, không nhỏ hơn nội dung; phần dư chia theo căn lề
+    const align = st.align || map.align || '';
+    const w = Math.max(w0 + 2 * dx, Math.round(st.w || 0)), h = Math.max(h0 + 2 * dy, Math.round(st.h || 0));
+    const ex = w - w0 - 2 * dx, ey = (h - h0 - 2 * dy) / 2;
+    const fx = align === 'right' ? 1 : align === 'center' || !st.w ? 0.5 : 0;
     const b = {
       id: n.id, node: n, depth, x: 0, y: 0, w, h, color, fill, stroke, text, shape, fs, font, lh, lines,
-      padX: padX + dx, padL: padL + dx, padT: padTop + dy, padB: padB + dy, textW, textH, mlines, iconW, indW, dir: 1, kids: [],
-      imgX: padX + dx + (innerW - imgW) / 2, imgY: padT + dy, imgW, imgH, align: st.align || '',
+      padX: padX + dx, padL: padL + dx + ex * fx, padT: padTop + dy + ey, padB: padB + dy + ey, textW, textH, mlines, iconW, indW, dir: 1, kids: [],
+      imgX: padX + dx + ex / 2 + (innerW - imgW) / 2, imgY: padT + dy + ey, imgW, imgH, align,
       ew: depth === 1 ? 3.5 : depth === 2 ? 2.2 : 1.6, ul: depth <= 1 ? 3 : 2,
     };
     // Hình vẽ bằng đường path (hình đặc biệt, hoặc mọi khung khi bật kiểu vẽ tay)
@@ -1116,7 +1122,7 @@ function isInside(id, ancestorId) {
 }
 
 /* ----- Lịch sử thao tác ----- */
-const snap = () => JSON.stringify({ root: S.map.root, relations: S.map.relations, layout: S.map.layout, theme: S.map.theme, sketch: !!S.map.sketch });
+const snap = () => JSON.stringify({ root: S.map.root, relations: S.map.relations, layout: S.map.layout, theme: S.map.theme, sketch: !!S.map.sketch, align: S.map.align || '' });
 function pushHist(s = snap()) { S.undo.push(s); if (S.undo.length > 200) S.undo.shift(); S.redo.length = 0; }
 function restore(s) {
   Object.assign(S.map, JSON.parse(s)); reindex();
@@ -1225,6 +1231,7 @@ function renderNodes(L, pf) {
         const off = hasTog ? 24 : 0;
         const [ax, ay] = typeof b.dir === 'string' ? [tx + off, ty] : [tx + off * b.dir, ty];
         inner += `<button class="tog add" data-act="tog-add" data-id="${b.id}" style="left:${ax}px;top:${ay}px" title="Thêm nút con (Tab)">+</button>`;
+        inner += `<span class="rsz${b.dir === -1 ? ' l' : ''}" data-rsz="${b.id}" title="Kéo để đổi kích thước · nhấp đúp để về cỡ tự động"></span>`;
       }
     }
     out.push(`<div class="${cls.join(' ')}" data-id="${b.id}" style="${style}">${inner}</div>`);
@@ -1541,6 +1548,15 @@ canvas.addEventListener('pointerdown', e => {
     gesture = { type: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), k: S.view.k };
     return;
   }
+  const rsz = e.target.closest('.rsz');
+  if (rsz) {
+    if (S.editing) commitEdit();
+    gesture = startResize(rsz.dataset.rsz, e, rsz.classList.contains('l'));
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return;
+  }
   const relHit = e.target.closest('.rel-hit');
   const nodeEl = e.target.closest('.node');
   if (relHit) {
@@ -1577,8 +1593,34 @@ const dropPointer = e => { pointers.delete(e.pointerId); if (gesture?.type === '
 canvas.addEventListener('pointerup', dropPointer);
 canvas.addEventListener('pointercancel', dropPointer);
 
+/** Bắt đầu kéo đổi cỡ. Thử làm nút to thêm 10px để biết mép nút dịch bao nhiêu
+ *  (nút neo trái, neo phải hay nằm giữa tùy bố cục), nhờ đó ô kéo luôn bám theo con trỏ. */
+function startResize(id, e, left) {
+  const n = getNode(id), b = S.L.boxes.get(id), orig = n.style ? { ...n.style } : null;
+  const probe = (key, v) => { n.style = { ...(orig || {}), [key]: v }; const q = computeLayout(S.map).boxes.get(id); if (orig) n.style = orig; else delete n.style; return q; };
+  const qw = probe('w', b.w + 10), qh = probe('h', b.h + 10);
+  const k = v => (Math.abs(v) < 0.2 ? 1 : Math.abs(v));
+  return {
+    type: 'resize', id, left, orig, w0: b.w, h0: b.h, p0: screenToWorld(e.clientX, e.clientY),
+    kx: k(left ? (b.x - qw.x) / 10 : (qw.x + qw.w - b.x - b.w) / 10), ky: k((qh.y + qh.h - b.y - b.h) / 10),
+  };
+}
+function resetSize(id) {
+  const n = getNode(id);
+  if (!n?.style || (n.style.w == null && n.style.h == null)) return;
+  commit(() => { const { w, h, ...rest } = n.style; if (Object.keys(rest).length) n.style = rest; else delete n.style; });
+}
 function onMove(e) {
   const g = gesture; if (!g) return;
+  if (g.type === 'resize') {
+    const p = screenToWorld(e.clientX, e.clientY), n = getNode(g.id);
+    const dx = (p.x - g.p0.x) * (g.left ? -1 : 1) / g.kx, dy = (p.y - g.p0.y) / g.ky;
+    const st = { ...(g.orig || {}), w: Math.round(Math.max(40, g.w0 + dx)) };
+    if (g.orig?.h || Math.abs(p.y - g.p0.y) > 4) st.h = Math.round(Math.max(20, g.h0 + dy));
+    n.style = g.last = st;
+    drawMap();
+    return;
+  }
   if (g.type === 'pan') {
     const dx = e.clientX - g.sx, dy = e.clientY - g.sy;
     if (!g.moved && Math.hypot(dx, dy) > 3) { g.moved = true; canvas.classList.add('panning'); }
@@ -1607,6 +1649,12 @@ function onUp() {
   const g = gesture; gesture = null;
   canvas.classList.remove('panning');
   if (!g) return;
+  if (g.type === 'resize') {
+    const n = getNode(g.id);
+    if (g.orig) n.style = g.orig; else delete n.style;
+    if (g.last) commit(() => { n.style = g.last; });
+    return;
+  }
   if (g.type === 'pan' && !g.moved) {
     if (S.sel || S.selRel) { S.sel = null; S.selRel = null; S.panelTab = 'map'; render(); }
   } else if (g.type === 'pan') scheduleSave(false);
@@ -1649,6 +1697,8 @@ function showDrop(d) {
 }
 
 canvas.addEventListener('dblclick', e => {
+  const rsz = e.target.closest('.rsz');
+  if (rsz) { resetSize(rsz.dataset.rsz); return; }
   const nodeEl = e.target.closest('.node');
   if (e.target.matches('.nimg')) { viewImage(getNode(nodeEl.dataset.id)); return; }
   if (nodeEl && !S.presenting && !S.quiz && !e.target.closest('[data-act]')) startEdit(nodeEl.dataset.id, { caretEnd: true });
@@ -1800,7 +1850,7 @@ function nodePanel() {
   <div class="pn-sec"><div class="pn-label">Màu nhánh ${st.color ? '<button data-act="set" data-key="color" data-val="">Mặc định</button>' : ''}</div>${swatches('color', SWATCH, st.color)}</div>
   <div class="pn-sec"><div class="pn-label">Nền</div>${swatches('fill', FILLS, st.fill, { none: true })}</div>
   <div class="pn-sec"><div class="pn-label">Màu chữ</div>${swatches('textColor', TEXTS, st.textColor, { none: true })}</div>
-  <div class="pn-sec"><div class="pn-label">Hình dạng</div><div class="seg">${shapes.map(([v, l]) => `<button class="${(st.shape || '') === v ? 'on' : ''}" data-act="set" data-key="shape" data-val="${v}">${l}</button>`).join('')}</div></div>
+  <div class="pn-sec"><div class="pn-label">Hình dạng ${st.w || st.h ? '<button data-act="reset-size" title="Bỏ kích thước đã kéo">Cỡ tự động</button>' : ''}</div><div class="seg">${shapes.map(([v, l]) => `<button class="${(st.shape || '') === v ? 'on' : ''}" data-act="set" data-key="shape" data-val="${v}">${l}</button>`).join('')}</div></div>
   <div class="pn-sec"><div class="pn-label">Chữ</div><div class="row">
     <button class="sq" data-act="font-dec" title="Nhỏ hơn">A−</button><span class="val">${b?.fs || ''}</span><button class="sq" data-act="font-inc" title="Lớn hơn">A+</button>
     <span style="flex:1"></span>
@@ -1845,6 +1895,9 @@ function mapPanel() {
         ${t.palette.slice(0, 4).map((c, i) => `<i style="background:${c};left:${[10, 17, 72, 79][i]}%;top:${[30, 70, 30, 70][i]}%"></i>`).join('')}
       </span>${t.name}</button>`).join('')}
   </div></div>
+  <div class="pn-sec"><div class="pn-label">Căn lề chữ mặc định</div><div class="seg" style="grid-template-columns:repeat(3,1fr)">
+    ${[['', 'Trái'], ['center', 'Giữa'], ['right', 'Phải']].map(([v, l]) => `<button class="${(S.map.align || '') === v ? 'on' : ''}" data-act="map-align" data-val="${v}">${l}</button>`).join('')}
+  </div><div class="muted" style="font-size:12px;margin-top:6px">Áp dụng cho mọi nút chưa chọn căn lề riêng.</div></div>
   <div class="pn-sec"><div class="pn-label">Kiểu nét</div><div class="seg" style="grid-template-columns:1fr 1fr">
     <button class="${S.map.sketch ? '' : 'on'}" data-act="sketch" data-val="">Gọn gàng</button>
     <button class="${S.map.sketch ? 'on' : ''}" data-act="sketch" data-val="1" style="font-family:${SKETCH_FONT}">✏️ Vẽ tay</button>
@@ -3217,6 +3270,7 @@ async function packMap(map) {
   const data = { v: 1, title: map.title, theme: map.theme, layout: map.layout, root: strip(map.root), relations: map.relations };
   if (map.quiz?.questions?.length) data.quiz = map.quiz;
   if (map.sketch) data.sketch = true;
+  if (map.align) data.align = map.align;
   const stream = new Blob([JSON.stringify(data)]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   return { code: b64url(new Uint8Array(await new Response(stream).arrayBuffer())), images, files };
 }
@@ -3275,6 +3329,7 @@ async function openShared(mode, code) {
   });
   if (data.quiz?.questions?.length) map.quiz = data.quiz;
   if (data.sketch) map.sketch = true;
+  if (['center', 'right'].includes(data.align)) map.align = data.align;
   showMap(map, { temp: true });
   saveNow();
   if (quizDepth) startQuiz(quizDepth);
@@ -3437,6 +3492,8 @@ const ACTIONS = {
   bold: () => { const b = S.L.boxes.get(S.sel); if (b) setStyle('bold', !(+/(\d+)/.exec(b.font)[1] >= 600)); },
   italic: () => { const n = getNode(S.sel); if (n) setStyle('italic', n.style?.italic ? '' : true); },
   layout: el => { commit(() => { S.map.layout = el.dataset.val; walk(S.map.root, n => { delete n.offset; }); if (el.dataset.val === 'map') assignSides(S.map.root); }); fitAll(); },
+  'reset-size': () => resetSize(S.sel),
+  'map-align': el => commit(() => { if (el.dataset.val) S.map.align = el.dataset.val; else delete S.map.align; }),
   'reset-pos': () => { const n = getNode(S.sel); if (n?.offset) commit(() => { delete n.offset; }); },
   'reset-all-pos': () => commit(() => { walk(S.map.root, n => { delete n.offset; }); }),
   theme: el => commit(() => { S.map.theme = el.dataset.val; }),
@@ -3505,6 +3562,7 @@ function showHelp() {
     ['<kbd>Ctrl</kbd>+<kbd>B</kbd> / <kbd>I</kbd>', 'Chữ đậm / nghiêng'], ['<kbd>Ctrl</kbd>+<kbd>F</kbd>', 'Tìm kiếm'],
     ['<kbd>Ctrl</kbd>+cuộn chuột, <kbd>Ctrl</kbd>+<kbd>=</kbd>/<kbd>−</kbd>', 'Phóng to / thu nhỏ'], ['<kbd>Ctrl</kbd>+<kbd>0</kbd>', 'Vừa màn hình'],
     ['Kéo khoảng trống / cuộn chuột', 'Di chuyển vùng vẽ'], ['Kéo một nút', 'Thả ra chỗ trống → đặt nút (cả nhánh) ở đó, đường nối tự đi theo; thả giữa nút khác → làm nút con; thả mép trên/dưới → chèn trước/sau. Nút “Về chỗ cũ” / “Sắp xếp lại” để trả về vị trí tự động'],
+    ['Kéo ô vuông ở góc nút đang chọn', 'Đổi kích thước nút (chữ tự xuống dòng theo bề rộng); nhấp đúp ô vuông để về cỡ tự động'],
     ['<code>$x^2$</code>, <code>$\\frac{a}{b}$</code>', 'Công thức toán: gõ LaTeX giữa hai dấu $ (ví dụ $\\sqrt{x}$, $H_2O$, $\\Delta = b^2 - 4ac$)'],
     ['<kbd>Home</kbd>', 'Chọn chủ đề trung tâm'], ['<kbd>Esc</kbd>', 'Bỏ chọn / hủy'],
   ];
@@ -3595,6 +3653,7 @@ $('#file-input').addEventListener('change', async e => {
       map.relations = (o.relations || []).filter(r => ids.has(r.from) && ids.has(r.to)).map(r => ({ id: r.id || uid(), from: r.from, to: r.to, label: r.label || '' }));
       if (o.quiz?.questions?.length) map.quiz = o.quiz;
       if (o.sketch) map.sketch = true;
+      if (['center', 'right'].includes(o.align)) map.align = o.align;
     } else if (/\.(mm|opml|xml)$/i.test(f.name)) {
       const root = parseXmlTree(text);
       if (root) map = newMap(root, root.text);

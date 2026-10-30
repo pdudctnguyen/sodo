@@ -9,5 +9,7 @@
 - Chia sẻ bằng link (dữ liệu nén trong link), xuất PNG/SVG/PDF/PowerPoint/Markdown/FreeMind
 - AI tạo sơ đồ & gợi ý ý con (dùng khóa API Anthropic của người dùng, lưu trong trình duyệt)
 - AI soạn câu hỏi ôn tập từ sơ đồ (trắc nghiệm / tự luận ngắn): học sinh làm bài và được chấm điểm ngay, gửi kèm qua link chia sẻ, in đề kèm đáp án
+- Thu kết quả cả lớp: học sinh nộp bài qua link, kết quả ghi vào Google Sheet của giáo viên (Apps Script tự triển khai), xem bảng điểm và tỉ lệ đúng từng câu ngay trong Sodo
+- In sơ đồ lớn ra nhiều trang A4 để ghép thành poster
 
 Dữ liệu sơ đồ lưu trong `localStorage` của từng trình duyệt.

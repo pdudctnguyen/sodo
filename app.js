@@ -3135,7 +3135,8 @@ Soạn đúng ${r.n} câu hỏi ôn tập dựa trên nội dung trên.
     const questions = parseQuiz(raw);
     if (!questions.length) throw new Error('AI không soạn được câu hỏi nào. Hãy thử lại.');
     done();
-    S.map.quiz = { questions, scope: node === S.map.root ? '' : node.text, createdAt: Date.now() };
+    const prev = S.map.quiz;
+    S.map.quiz = { id: uid(), questions, scope: node === S.map.root ? '' : node.text, createdAt: Date.now(), ...(prev?.collect ? { collect: prev.collect } : {}) };
     scheduleSave();
     quizPlayer();
   } catch (err) { done(); console.error(err); toast(err.message || 'Có lỗi khi gọi AI', 4500); }
@@ -3162,9 +3163,14 @@ async function quizPlayer() {
       <div class="qz-ans" hidden><b>Đáp án:</b> ${richText(q.options.length ? `${LETTERS[order[i].indexOf(q.correct)]}. ${q.options[q.correct]}` : q.answer)}${q.explain ? `<div class="muted">${richText(q.explain)}</div>` : ''}</div>
     </li>`).join('');
   let next = null;
+  const collecting = S.temp && quiz.collect && COLLECT_URL_RE.test(quiz.collect);
+  let who = {};
+  try { who = JSON.parse(localStorage.getItem('sodo.student') || '{}'); } catch {}
   await modal({
     title: `Câu hỏi ôn tập${quiz.scope ? ` — ${quiz.scope}` : ''}`, wide: true,
     body: `<div class="qz">
+        ${collecting ? `<div class="qz-who"><div class="muted" style="font-size:13px;margin-bottom:6px">Kết quả sẽ được gửi cho giáo viên.</div>
+          <div class="row" style="gap:8px"><input class="field" id="qz-name" style="flex:2" placeholder="Họ và tên" value="${esc(who.name || '')}"><input class="field" id="qz-cls" style="flex:1" placeholder="Lớp" value="${esc(who.cls || '')}"></div></div>` : ''}
         <div class="qz-score" hidden></div>
         <ol class="qz-list"></ol>
         <div class="row qz-tools">
@@ -3172,7 +3178,7 @@ async function quizPlayer() {
           <button type="button" class="btn" data-qz="retry" hidden>Làm lại</button>
           <span style="flex:1"></span>
           <button type="button" class="btn small" data-qz="print">${icon('download')} In đề / đáp án</button>
-          ${S.temp ? '' : `<button type="button" class="btn small" data-qz="new">${icon('sparkle')} Soạn bộ mới</button><button type="button" class="btn small" data-qz="del" title="Xóa bộ câu hỏi khỏi sơ đồ">${icon('trash')}</button>`}
+          ${S.temp ? '' : `<button type="button" class="btn small" data-qz="collect">${quiz.collect ? '📊 Kết quả lớp' : '📊 Thu kết quả cả lớp'}</button><button type="button" class="btn small" data-qz="new">${icon('sparkle')} Soạn bộ mới</button><button type="button" class="btn small" data-qz="del" title="Xóa bộ câu hỏi khỏi sơ đồ">${icon('trash')}</button>`}
         </div>
       </div>`,
     actions: [{ label: 'Đóng', value: null }],
@@ -3190,6 +3196,11 @@ async function quizPlayer() {
       m.addEventListener('click', async e => {
         const act = e.target.closest('[data-qz]')?.dataset.qz;
         if (act === 'submit') {
+          if (collecting) {
+            who = { name: $('#qz-name', m).value.trim(), cls: $('#qz-cls', m).value.trim() };
+            if (!who.name) { toast('Em hãy nhập họ và tên trước khi nộp bài'); $('#qz-name', m).focus(); return; }
+            try { localStorage.setItem('sodo.student', JSON.stringify(who)); } catch {}
+          }
           let right = 0, blank = 0;
           $$('.qz-q', list).forEach(li => {
             const q = quiz.questions[+li.dataset.i];
@@ -3211,6 +3222,19 @@ async function quizPlayer() {
             ? `<b>${right}/${nMcq}</b> câu trắc nghiệm đúng · <b>${(right / nMcq * 10).toFixed(1).replace('.', ',')}</b> điểm${blank ? ` · bỏ trống ${blank} câu` : ''}<span class="muted">${pct >= 80 ? ' — Rất tốt! 🎉' : pct >= 50 ? ' — Khá, xem lại các câu sai nhé.' : ' — Cần ôn thêm, đọc kỹ phần giải thích.'}</span>${nMcq < quiz.questions.length ? '<div class="muted" style="font-size:13px">Câu tự luận: em tự so với đáp án mẫu.</div>' : ''}`
             : 'Em hãy tự so câu trả lời với đáp án mẫu bên dưới mỗi câu.';
           score.classList.toggle('good', pct >= 50);
+          if (collecting) {
+            const answers = quiz.questions.map((q, i) => {
+              const li = list.querySelector(`.qz-q[data-i="${i}"]`);
+              return q.options.length ? +(li.querySelector('.qz-opt.on')?.dataset.o ?? -1) : (li.querySelector('.qz-write')?.value || '').slice(0, 300);
+            });
+            const sent = document.createElement('div');
+            sent.className = 'muted'; sent.style.fontSize = '13px'; sent.textContent = 'Đang gửi kết quả cho giáo viên…';
+            score.appendChild(sent);
+            Collect.send(quiz.collect, {
+              quiz: quiz.id || '', title: S.map.title + (quiz.scope ? ` — ${quiz.scope}` : ''), name: who.name, cls: who.cls,
+              score: nMcq ? Math.round(right / nMcq * 100) / 10 : '', right, total: nMcq, answers,
+            }).then(st => { sent.textContent = st === 'ok' ? '✅ Đã gửi kết quả cho giáo viên.' : st === 'sent' ? '✅ Đã gửi kết quả.' : '⚠️ Chưa gửi được kết quả — em hãy báo giáo viên.'; });
+          }
           $('[data-qz="submit"]', m).hidden = true; $('[data-qz="retry"]', m).hidden = false;
           score.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else if (act === 'retry') {
@@ -3218,6 +3242,7 @@ async function quizPlayer() {
           list.scrollIntoView({ block: 'start' });
         } else if (act === 'print') printQuiz(quiz, order);
         else if (act === 'new') { next = 'new'; close(); }
+        else if (act === 'collect') { next = 'collect'; close(); }
         else if (act === 'del') {
           next = 'del'; close();
         }
@@ -3225,8 +3250,200 @@ async function quizPlayer() {
     },
   });
   if (next === 'new') quizSetup();
+  if (next === 'collect') { if (quiz.collect) quizResults(); else if (await collectSetup()) quizResults(); }
   if (next === 'del' && await confirmBox('Xóa bộ câu hỏi?', 'Bộ câu hỏi sẽ bị xóa khỏi sơ đồ này. Bạn có thể nhờ AI soạn bộ khác bất cứ lúc nào.')) {
     delete S.map.quiz; scheduleSave(); toast('Đã xóa bộ câu hỏi');
+  }
+}
+/* ----- Thu kết quả cả lớp: học sinh nộp bài → ghi vào Google Sheet của giáo viên (qua Apps Script tự triển khai) ----- */
+const COLLECT_URL_RE = /^https:\/\/script\.google\.com\/(?:a\/macros\/[^/]+|macros)\/s\/[\w-]+\/exec$/;
+const Collect = {
+  cfg() { try { return JSON.parse(localStorage.getItem('sodo.collect') || '{}'); } catch { return {}; } },
+  save(c) { try { localStorage.setItem('sodo.collect', JSON.stringify(c)); } catch {} },
+  key() {
+    const c = this.cfg();
+    if (!c.key) { c.key = Array.from(crypto.getRandomValues(new Uint8Array(15)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 24); this.save(c); }
+    return c.key;
+  },
+  script: key => `// Sodo — nhận kết quả làm bài của học sinh và ghi vào trang tính "Kết quả"
+const KEY = '${key}';   // mã bí mật để giáo viên xem kết quả; đừng chia sẻ
+const HEAD = ['Thời gian', 'Mã bài', 'Tên bài', 'Họ và tên', 'Lớp', 'Điểm', 'Số câu đúng', 'Số câu trắc nghiệm', 'Chi tiết'];
+function sheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName('Kết quả') || ss.insertSheet('Kết quả');
+  if (sh.getLastRow() === 0) { sh.appendRow(HEAD); sh.setFrozenRows(1); }
+  return sh;
+}
+function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+// Cắt ngắn và chặn chữ bắt đầu bằng = + - @ (để không thành công thức trong Sheet)
+function txt_(v, n) { const s = String(v == null ? '' : v).slice(0, n); return /^[=+\\-@]/.test(s) ? "'" + s : s; }
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const d = JSON.parse(e.postData.contents);
+    sheet_().appendRow([new Date(), txt_(d.quiz, 40), txt_(d.title, 200), txt_(d.name, 100), txt_(d.cls, 40),
+      d.score === '' ? '' : Number(d.score) || 0, Number(d.right) || 0, Number(d.total) || 0, txt_(JSON.stringify(d.answers || []), 3000)]);
+    return out_({ ok: true });
+  } catch (err) {
+    return out_({ ok: false, error: String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+function doGet(e) {
+  const p = e.parameter || {};
+  if (p.key !== KEY) return out_({ ok: false, error: 'key' });
+  const sh = sheet_(), n = sh.getLastRow() - 1;
+  const rows = n > 0 ? sh.getRange(2, 1, n, HEAD.length).getValues() : [];
+  return out_({
+    ok: true, sheet: SpreadsheetApp.getActiveSpreadsheet().getUrl(),
+    rows: rows.filter(r => !p.quiz || r[1] === p.quiz).map(r => ({ time: r[0], name: r[3], cls: r[4], score: r[5], right: r[6], total: r[7], answers: r[8] })),
+  });
+}
+`,
+  async read(url, key, quiz) {
+    let res;
+    try { res = await fetch(`${url}?key=${encodeURIComponent(key)}&quiz=${encodeURIComponent(quiz)}`); }
+    catch { throw new Error('Không kết nối được tới Google Apps Script. Kiểm tra mạng và URL ứng dụng web.'); }
+    let d = null;
+    try { d = await res.json(); } catch {}
+    if (!d) throw new Error('Apps Script không trả về dữ liệu. Hãy chắc đã chọn “Người có quyền truy cập: Bất kỳ ai” khi triển khai.');
+    if (!d.ok) throw new Error(d.error === 'key' ? 'Sai mã bí mật — mã trong Apps Script khác với mã trên máy này.' : `Lỗi từ Apps Script: ${d.error}`);
+    return d;
+  },
+  /** Gửi kết quả; trả về 'ok' | 'sent' (đã gửi nhưng không đọc được xác nhận) | 'fail'. Không gửi lại để tránh ghi trùng. */
+  async send(url, payload) {
+    if (!COLLECT_URL_RE.test(url)) return 'fail';
+    try {
+      const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
+      const d = await res.json().catch(() => null);
+      return d?.ok ? 'ok' : d ? 'fail' : 'sent';
+    } catch { return 'sent'; }
+  },
+};
+
+async function collectSetup() {
+  const quiz = S.map.quiz, cfg = Collect.cfg();
+  let key = Collect.key();
+  const r = await modal({
+    title: 'Thu kết quả cả lớp vào Google Sheet', wide: true,
+    body: `<p>Học sinh mở link làm bài, nhập họ tên, nộp bài → kết quả tự ghi vào một Google Sheet <b>của bạn</b>. Chỉ cần cài đặt <b>một lần</b>, dùng chung cho mọi bộ câu hỏi.</p>
+      <ol class="steps">
+        <li>Mở <a href="https://sheets.new" target="_blank" rel="noopener">sheets.new</a> để tạo một Google Sheet mới (đặt tên ví dụ “Kết quả Sodo”).</li>
+        <li>Trong Sheet chọn <b>Tiện ích mở rộng → Apps Script</b>. Xóa hết mã có sẵn, dán đoạn mã bên dưới, bấm <b>Lưu</b>.</li>
+        <li>Bấm <b>Triển khai → Tùy chọn triển khai mới</b> → loại <b>Ứng dụng web</b>. Thực thi với tư cách: <b>Tôi</b>; Người có quyền truy cập: <b>Bất kỳ ai</b>. Bấm <b>Triển khai</b> và cấp quyền khi Google hỏi.</li>
+        <li>Sao chép <b>URL ứng dụng web</b> (dạng https://script.google.com/macros/s/…/exec) rồi dán vào ô dưới.</li>
+      </ol>
+      <div class="row" style="justify-content:space-between;margin:4px 0"><span class="muted" style="font-size:13px">Mã Apps Script</span><button type="button" class="btn small" id="cl-copy">${icon('copy')} Sao chép mã</button></div>
+      <textarea class="field code" id="cl-code" rows="7" readonly></textarea>
+      <div class="row" style="gap:8px;margin-top:10px">
+        <input class="field" id="cl-url" style="flex:1" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(quiz?.collect || cfg.url || '')}">
+        <button type="button" class="btn" id="cl-test">Kiểm tra</button>
+      </div>
+      <div id="cl-st" class="muted" style="font-size:13px;margin-top:6px"></div>
+      <details style="margin-top:10px"><summary class="muted" style="font-size:13px">Mã bí mật (dùng khi xem kết quả trên máy khác)</summary>
+        <p class="muted" style="font-size:13px;margin:6px 0">Mã nằm trong Apps Script; chỉ ai có mã mới xem được bảng điểm trong Sodo. Trên máy khác, dán đúng mã này vào đây.</p>
+        <input class="field" id="cl-key" style="width:100%" value="${esc(key)}"></details>`,
+    actions: [{ label: 'Hủy', value: null }, { label: 'Lưu và bật thu kết quả', primary: true, value: m => ({ url: $('#cl-url', m).value.trim(), key: $('#cl-key', m).value.trim() }) }],
+    onOpen: m => {
+      const code = $('#cl-code', m), st = $('#cl-st', m);
+      const fill = () => { code.value = Collect.script($('#cl-key', m).value.trim() || key); };
+      fill();
+      $('#cl-key', m).oninput = fill;
+      $('#cl-copy', m).onclick = async () => {
+        try { await navigator.clipboard.writeText(code.value); } catch { code.select(); document.execCommand('copy'); }
+        toast('Đã sao chép mã Apps Script');
+      };
+      $('#cl-test', m).onclick = async () => {
+        const url = $('#cl-url', m).value.trim();
+        if (!COLLECT_URL_RE.test(url)) { st.textContent = '⚠️ URL chưa đúng dạng https://script.google.com/macros/s/…/exec'; return; }
+        st.textContent = 'Đang kiểm tra…';
+        try { await Collect.read(url, $('#cl-key', m).value.trim(), '__ping'); st.textContent = '✅ Kết nối được với Google Sheet của bạn.'; }
+        catch (err) { st.textContent = '⚠️ ' + err.message; }
+      };
+    },
+  });
+  if (!r) return false;
+  if (!COLLECT_URL_RE.test(r.url)) { toast('URL ứng dụng web chưa đúng dạng https://script.google.com/macros/s/…/exec', 4500); return false; }
+  Collect.save({ ...Collect.cfg(), url: r.url, key: r.key || key });
+  quiz.id ||= uid();
+  quiz.collect = r.url;
+  scheduleSave();
+  toast('Đã bật thu kết quả. Gửi cho học sinh link Chia sẻ → “Làm bài”.', 4500);
+  return true;
+}
+
+async function quizResults() {
+  const quiz = S.map.quiz;
+  let data = null, err = '', next = null;
+  const nMcqQ = quiz.questions.filter(q => q.options.length);
+  const view = () => {
+    if (err) return `<p>⚠️ ${esc(err)}</p>`;
+    if (!data) return '<p class="row" style="gap:10px"><span class="spinner"></span> Đang tải kết quả…</p>';
+    const rows = data.rows.slice().sort((a, b) => String(b.time).localeCompare(String(a.time)));
+    if (!rows.length) return '<p>Chưa có học sinh nào nộp bài. Gửi cho học sinh link Chia sẻ → “Làm bài”.</p>';
+    const scores = rows.map(r => +r.score).filter(Number.isFinite);
+    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+    const fmt = v => (Math.round(v * 10) / 10).toString().replace('.', ',');
+    // Tỉ lệ đúng từng câu trắc nghiệm, giúp thấy câu nào cả lớp hay sai
+    const per = quiz.questions.map((q, i) => {
+      if (!q.options.length) return null;
+      let ok = 0, n = 0;
+      for (const r of rows) { let a; try { a = JSON.parse(r.answers || '[]'); } catch { a = []; } if (a[i] != null && a[i] !== -1) n++; if (a[i] === q.correct) ok++; }
+      return { i, pct: rows.length ? Math.round(ok / rows.length * 100) : 0, n };
+    }).filter(Boolean);
+    return `<div class="stats" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px">
+        <div><b>${rows.length}</b><span>bài nộp</span></div><div><b>${fmt(avg)}</b><span>điểm TB</span></div>
+        <div><b>${scores.length ? fmt(Math.max(...scores)) : '–'}</b><span>cao nhất</span></div><div><b>${scores.length ? fmt(Math.min(...scores)) : '–'}</b><span>thấp nhất</span></div></div>
+      ${per.length ? `<div class="pn-label">Tỉ lệ đúng từng câu</div><div class="qr-bars">${per.map(p => `<div title="Câu ${p.i + 1}: ${esc(quiz.questions[p.i].q)}"><span>Câu ${p.i + 1}</span><i><b style="width:${p.pct}%;background:${p.pct >= 70 ? '#20a36b' : p.pct >= 40 ? '#f2a516' : '#e5484d'}"></b></i><em>${p.pct}%</em></div>`).join('')}</div>` : ''}
+      <div class="qr-table"><table><thead><tr><th>Họ và tên</th><th>Lớp</th><th>Điểm</th><th>Đúng</th><th>Nộp lúc</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.cls)}</td><td><b>${r.score === '' ? '–' : fmt(+r.score)}</b></td><td>${esc(r.right)}/${esc(r.total)}</td><td>${esc(new Date(r.time).toLocaleString('vi-VN'))}</td></tr>`).join('')}
+      </tbody></table></div>`;
+  };
+  const toCSV = () => {
+    const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = [['Họ và tên', 'Lớp', 'Điểm', 'Số câu đúng', 'Số câu trắc nghiệm', 'Nộp lúc'].map(q).join(',')];
+    for (const r of data.rows) lines.push([r.name, r.cls, r.score, r.right, r.total, new Date(r.time).toLocaleString('vi-VN')].map(q).join(','));
+    download(safeName(S.map.title) + ' - ket qua.csv', '﻿' + lines.join('\r\n'), 'text/csv');
+  };
+  await modal({
+    title: `Kết quả lớp — ${quiz.scope || S.map.title}`, wide: true,
+    body: `<div id="qr-body"></div>
+      <div class="row qz-tools">
+        <button type="button" class="btn small" data-qr="reload">${icon('reset')} Làm mới</button>
+        <button type="button" class="btn small" data-qr="sheet" hidden>Mở Google Sheet</button>
+        <button type="button" class="btn small" data-qr="csv" hidden>${icon('download')} Tải CSV</button>
+        <span style="flex:1"></span>
+        <button type="button" class="btn small" data-qr="setup">Cài đặt</button>
+        <button type="button" class="btn small" data-qr="stop" title="Học sinh làm bài vẫn được chấm điểm nhưng không gửi kết quả nữa">Ngừng thu</button>
+      </div>`,
+    actions: [{ label: 'Đóng', value: null }],
+    onOpen: m => {
+      m.querySelector('.modal').style.width = 'min(760px,100%)';
+      const body = $('#qr-body', m);
+      const load = async () => {
+        data = null; err = ''; body.innerHTML = view();
+        const cfg = Collect.cfg();
+        if (!cfg.key) err = 'Máy này chưa có mã bí mật. Bấm “Cài đặt” và dán mã bí mật từ máy đã cài.';
+        else { try { data = await Collect.read(quiz.collect, cfg.key, quiz.id); } catch (e) { err = e.message; } }
+        body.innerHTML = view();
+        $('[data-qr="sheet"]', m).hidden = !data?.sheet;
+        $('[data-qr="csv"]', m).hidden = !data?.rows?.length;
+      };
+      load();
+      m.addEventListener('click', e => {
+        const a = e.target.closest('[data-qr]')?.dataset.qr;
+        if (a === 'reload') load();
+        else if (a === 'sheet' && data?.sheet) window.open(data.sheet, '_blank', 'noopener');
+        else if (a === 'csv' && data) toCSV();
+        else if (a === 'setup' || a === 'stop') { next = a; $('.foot button', m).click(); }
+      });
+    },
+  });
+  if (next === 'setup') { if (await collectSetup()) quizResults(); }
+  if (next === 'stop' && await confirmBox('Ngừng thu kết quả?', 'Học sinh vẫn làm bài và được chấm điểm, nhưng kết quả không gửi về Google Sheet nữa. Dữ liệu đã có trong Sheet vẫn giữ nguyên.', 'Ngừng thu')) {
+    delete quiz.collect; scheduleSave(); toast('Đã ngừng thu kết quả');
   }
 }
 /** In đề (phương án theo thứ tự đang hiển thị) và trang đáp án riêng. */
@@ -3302,7 +3519,7 @@ async function shareMap() {
       <div class="seg" style="grid-template-columns:repeat(3,1fr);margin-bottom:10px">
         <button class="on" data-q="0">Xem bình thường</button><button data-q="1">Ôn tập: che hết</button><button data-q="2">Ôn tập: che ý con</button>
       </div>
-      ${S.map.quiz?.questions?.length ? `<div class="seg" style="grid-template-columns:1fr;margin-bottom:10px"><button data-q="q">${icon('check')} Làm bài ${S.map.quiz.questions.length} câu hỏi ôn tập (mở link là vào làm bài)</button></div>` : ''}
+      ${S.map.quiz?.questions?.length ? `<div class="seg" style="grid-template-columns:1fr;margin-bottom:10px"><button data-q="q">${icon('check')} Làm bài ${S.map.quiz.questions.length} câu hỏi ôn tập (mở link là vào làm bài${S.map.quiz.collect ? ', kết quả gửi về Google Sheet của bạn' : ''})</button></div>` : ''}
       <div class="row"><input class="field" id="share-link" readonly style="flex:1"><button class="btn primary" id="share-copy">Sao chép</button></div>
       ${warn.map(w => `<p class="muted" style="font-size:13px;margin:10px 0 0">${esc(w)}</p>`).join('')}`,
     actions: [{ label: 'Đóng', value: null }],

@@ -486,3 +486,18 @@ kbd {
 .rsz.rsz-y { left: 50%; right: auto; bottom: -5px; width: 18px; height: 8px; margin-left: -9px; border-radius: 4px; cursor: ns-resize; }
 .pp-prev { background: var(--surface-2); border-radius: 10px; padding: 8px; }
 .pp-prev canvas { width: 100%; height: auto; display: block; }
+
+/* ---------- Thu kết quả cả lớp ---------- */
+.qz-who { padding: 10px 12px; border-radius: 10px; background: var(--surface-2); margin-bottom: 12px; }
+.steps { margin: 0 0 10px; padding-left: 20px; line-height: 1.55; }
+.steps li { margin-bottom: 4px; }
+.field.code { width: 100%; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre; resize: vertical; }
+.qr-bars { display: grid; gap: 4px; margin: 6px 0 14px; }
+.qr-bars div { display: grid; grid-template-columns: 56px 1fr 40px; gap: 8px; align-items: center; font-size: 13px; }
+.qr-bars i { height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden; display: block; }
+.qr-bars b { display: block; height: 100%; border-radius: 5px; }
+.qr-bars em { font-style: normal; color: var(--muted); text-align: right; }
+.qr-table { max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.qr-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.qr-table th, .qr-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.qr-table th { position: sticky; top: 0; background: var(--surface-2); font-weight: 600; }

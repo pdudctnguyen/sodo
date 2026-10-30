@@ -41,6 +41,9 @@ const ICONS = {
   quiz: '<path d="M3 3l18 18"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-2.6 3.2M6.6 6.6C4.2 8.2 3 12 3 12s4 6 9 6c1.5 0 2.9-.4 4.1-1.1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
   reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  'align-left': '<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',
+  'align-center': '<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',
+  'align-right': '<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
   check: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.5h6V4"/><path d="m9 13 2 2 4-4"/>',
 };
@@ -558,9 +561,10 @@ function mathBlockSVG(b) {
   const out = [];
   let y = 0;
   for (const l of b.mlines) {
+    const ox = alignOff(b, l.w);
     for (const s of l.segs) {
-      if (s.t === 'math') out.push(s.svg.replace('<svg', `<svg x="${s.x.toFixed(2)}" y="${(y + l.base - (s.h - s.d)).toFixed(2)}"`).replace(/currentColor/g, b.text));
-      else out.push(`<text x="${s.x.toFixed(2)}" y="${(y + l.base).toFixed(2)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" xml:space="preserve">${esc(s.s)}</text>`);
+      if (s.t === 'math') out.push(s.svg.replace('<svg', `<svg x="${(ox + s.x).toFixed(2)}" y="${(y + l.base - (s.h - s.d)).toFixed(2)}"`).replace(/currentColor/g, b.text));
+      else out.push(`<text x="${(ox + s.x).toFixed(2)}" y="${(y + l.base).toFixed(2)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" xml:space="preserve">${esc(s.s)}</text>`);
     }
     y += l.h;
   }
@@ -579,6 +583,8 @@ function mathImage(svg, color) {
   return im;
 }
 
+/** Khoảng lùi đầu dòng theo căn lề của nút (w: bề rộng dòng đó). */
+const alignOff = (b, w) => (b.align === 'center' ? (b.textW - 2 - w) / 2 : b.align === 'right' ? b.textW - 2 - w : 0);
 const anchorY = b => (b.shape === 'underline' ? b.y + b.h - b.ul / 2 : b.y + b.h / 2);
 const radiusOf = b => ({ rounded: b.depth === 0 ? 16 : 10, rect: 3, pill: b.h / 2 }[b.shape] || 0);
 
@@ -755,7 +761,7 @@ function computeLayout(map) {
     const b = {
       id: n.id, node: n, depth, x: 0, y: 0, w, h, color, fill, stroke, text, shape, fs, font, lh, lines,
       padX: padX + dx, padL: padL + dx, padT: padTop + dy, padB: padB + dy, textW, textH, mlines, iconW, indW, dir: 1, kids: [],
-      imgX: padX + dx + (innerW - imgW) / 2, imgY: padT + dy, imgW, imgH,
+      imgX: padX + dx + (innerW - imgW) / 2, imgY: padT + dy, imgW, imgH, align: st.align || '',
       ew: depth === 1 ? 3.5 : depth === 2 ? 2.2 : 1.6, ul: depth <= 1 ? 3 : 2,
     };
     // Hình vẽ bằng đường path (hình đặc biệt, hoặc mọi khung khi bật kiểu vẽ tay)
@@ -1016,14 +1022,15 @@ function drawNodeCanvas(ctx, b) {
     ctx.textBaseline = 'alphabetic';
     let y = top;
     for (const l of b.mlines) {
+      const lx = x + alignOff(b, l.w);
       for (const sg of l.segs) {
-        if (sg.t === 'text') ctx.fillText(sg.s, x + sg.x, y + l.base);
-        else { const im = mathImage(sg.svg, b.text); if (im.complete && im.naturalWidth) ctx.drawImage(im, x + sg.x, y + l.base - (sg.h - sg.d), sg.w, sg.h); }
+        if (sg.t === 'text') ctx.fillText(sg.s, lx + sg.x, y + l.base);
+        else { const im = mathImage(sg.svg, b.text); if (im.complete && im.naturalWidth) ctx.drawImage(im, lx + sg.x, y + l.base - (sg.h - sg.d), sg.w, sg.h); }
       }
       y += l.h;
     }
     ctx.textBaseline = 'middle';
-  } else b.lines.forEach((l, i) => ctx.fillText(l, x, top + b.lh * (i + 0.5)));
+  } else b.lines.forEach((l, i) => ctx.fillText(l, x + alignOff(b, tw(l, b.font)), top + b.lh * (i + 0.5)));
   if (b.indW) {
     ctx.font = `12px ${EMOJI_FONT}`;
     let ix = x + b.textW + 6;
@@ -1055,7 +1062,7 @@ function renderSVG(map) {
     const [, ital, weight] = /^(italic )?(\d+)/.exec(b.font);
     if (b.node.icon) { o.push(`<text x="${x}" y="${midY}" font-size="${b.fs}" dominant-baseline="central">${esc(b.node.icon)}</text>`); x += b.iconW; }
     if (b.mlines) o.push(`<g transform="translate(${x} ${top})">${mathBlockSVG(b)}</g>`);
-    else b.lines.forEach((l, i) => o.push(`<text x="${x}" y="${top + b.lh * (i + 0.5)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" dominant-baseline="central" xml:space="preserve">${esc(l)}</text>`));
+    else b.lines.forEach((l, i) => o.push(`<text x="${x + alignOff(b, tw(l, b.font))}" y="${top + b.lh * (i + 0.5)}" font-size="${b.fs}" font-weight="${weight}"${ital ? ' font-style="italic"' : ''} fill="${b.text}" dominant-baseline="central" xml:space="preserve">${esc(l)}</text>`));
     if (b.indW) o.push(`<text x="${x + b.textW + 6}" y="${midY}" font-size="12" dominant-baseline="central">${b.node.note ? '📝' : ''}${b.node.links?.length ? '🔗' : ''}${b.node.files?.length ? '📎' : ''}</text>`);
   }
   for (const r of map.relations || []) {
@@ -1197,7 +1204,7 @@ function renderNodes(L, pf) {
     if (n.icon) inner += `<span class="ic" style="width:${b.iconW}px;font-size:${b.fs}px">${esc(n.icon)}</span>`;
     inner += b.mlines
       ? `<svg class="tx" width="${b.textW}" height="${b.textH}" style="overflow:visible;font-family:${L.font}">${mathBlockSVG(b)}</svg>`
-      : `<span class="tx">${esc(b.lines.join('\n'))}</span>`;
+      : `<span class="tx"${b.align ? ` style="display:inline-block;width:${b.textW - 2}px;text-align:${b.align}"` : ''}>${esc(b.lines.join('\n'))}</span>`;
     if (b.indW) {
       inner += '<span class="inds">' +
         (n.note ? `<span class="ind" data-act="ind-note" data-id="${b.id}" title="${esc(n.note)}">📝</span>` : '') +
@@ -1433,7 +1440,7 @@ function positionEditor(L) {
   const innerH = b.h - b.padT - b.padB, th = b.textH;
   Object.assign(editorEl.style, {
     left: b.x + b.padL + b.iconW + 'px', top: b.y + b.padT + (innerH - th) / 2 + 'px',
-    width: b.textW + 6 + 'px', height: th + 'px', font: b.font, lineHeight: b.lh + 'px', color: b.text, caretColor: b.text,
+    width: b.textW + 6 + 'px', height: th + 'px', font: b.font, lineHeight: b.lh + 'px', color: b.text, caretColor: b.text, textAlign: b.align || 'left',
   });
 }
 function commitEdit() {
@@ -1799,6 +1806,8 @@ function nodePanel() {
     <span style="flex:1"></span>
     <button class="sq ${bold ? 'on' : ''}" data-act="bold" title="Đậm (Ctrl+B)"><b>B</b></button>
     <button class="sq ${st.italic ? 'on' : ''}" data-act="italic" title="Nghiêng (Ctrl+I)"><i>I</i></button></div>
+    <div class="row" style="margin-top:8px"><span class="muted" style="font-size:12px">Căn lề</span><span style="flex:1"></span>
+    ${[['', 'align-left', 'Căn trái'], ['center', 'align-center', 'Căn giữa'], ['right', 'align-right', 'Căn phải']].map(([v, ic, t]) => `<button class="sq ${(st.align || '') === v ? 'on' : ''}" data-act="set" data-key="align" data-val="${v}" title="${t}">${icon(ic)}</button>`).join('')}</div>
     <div class="muted" style="font-size:12px;margin-top:8px">Công thức: gõ giữa hai dấu $, ví dụ <code>$x^2+1$</code>, <code>$\\frac{a}{b}$</code>, <code>$\\sqrt{2}$</code>.</div></div>
   <div class="pn-sec"><div class="pn-label">Biểu tượng ${n.icon ? '<button data-act="set-icon" data-val="">Bỏ</button>' : ''}</div>
     <div class="emoji-grid">${EMOJIS.map(e => `<button class="${n.icon === e ? 'on' : ''}" data-act="set-icon" data-val="${e}">${e}</button>`).join('')}</div></div>

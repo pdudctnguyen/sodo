@@ -3356,6 +3356,88 @@ async function exportPNG() {
   await preloadImages(S.map);
   renderCanvas(S.map, { scale: 2 }).toBlob(b => download(safeName(S.map.title) + '.png', b), 'image/png');
 }
+/** In sơ đồ lớn ra nhiều trang A4 để ghép thành tờ to: chọn khổ giấy và số trang theo chiều ngang. */
+async function printPoster() {
+  if (S.editing) commitEdit();
+  await preloadImages(S.map);
+  const L = computeLayout(S.map);
+  const W = L.bounds.w + 60, H = L.bounds.h + 60;   // pad 30 mỗi bên, khớp renderCanvas bên dưới
+  const thumb = renderCanvas(S.map, { scale: Math.min(880 / W, 600 / H), pad: 30 });
+  let land = W >= H, cols = Math.min(6, Math.max(2, Math.round(W / 900)));
+  // Vùng in của A4 khi chừa lề 8mm
+  const ratio = () => (land ? 194 / 281 : 281 / 194);
+  const rowsOf = c => Math.max(1, Math.ceil(H / ((W / c) * ratio())));
+  const r = await modal({
+    title: 'In nhiều trang A4', wide: true,
+    body: `<p>Sơ đồ được chia thành nhiều trang A4, in xong cắt theo đường viền mờ rồi ghép lại thành tờ khổ lớn (dán bảng, làm poster).</p>
+      <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
+        <button type="button" data-o="land">Giấy ngang</button><button type="button" data-o="port">Giấy dọc</button></div>
+      <div class="row" style="gap:10px;margin-bottom:10px">
+        <label class="muted" for="pp-cols">Số trang theo chiều ngang</label>
+        <select id="pp-cols" class="field" style="width:auto">${[1, 2, 3, 4, 5, 6].map(c => `<option${c === cols ? ' selected' : ''}>${c}</option>`).join('')}</select>
+        <span style="flex:1"></span><b id="pp-info"></b>
+      </div>
+      <div class="pp-prev"><canvas id="pp-cv"></canvas></div>
+      <label class="row" style="gap:8px;margin-top:10px"><input type="checkbox" id="pp-lbl" checked> Ghi số trang và vị trí ghép ở góc mỗi trang</label>`,
+    actions: [{ label: 'Hủy', value: null }, { label: 'In', primary: true, value: m => ({ land, cols, labels: $('#pp-lbl', m).checked }) }],
+    onOpen: m => {
+      const cv = $('#pp-cv', m), ctx = cv.getContext('2d');
+      cv.width = 880; cv.height = 600;
+      // Vẽ ảnh thu nhỏ kèm lưới chia trang
+      const draw = () => {
+        const rows = rowsOf(cols), GH = rows * (W / cols) * ratio(), k = Math.min(cv.width / W, cv.height / GH);
+        const gw = W * k, tw = gw / cols, th = tw * ratio(), gh = th * rows;
+        const ox = (cv.width - gw) / 2, oy = (cv.height - gh) / 2;
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        ctx.fillStyle = L.theme.bg; ctx.fillRect(ox, oy, gw, gh);
+        ctx.drawImage(thumb, ox, oy + (gh - H * k) / 2, gw, H * k);
+        ctx.strokeStyle = '#4f46e5'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+        for (let c = 0; c <= cols; c++) { ctx.beginPath(); ctx.moveTo(ox + c * tw, oy); ctx.lineTo(ox + c * tw, oy + gh); ctx.stroke(); }
+        for (let i = 0; i <= rows; i++) { ctx.beginPath(); ctx.moveTo(ox, oy + i * th); ctx.lineTo(ox + gw, oy + i * th); ctx.stroke(); }
+        ctx.setLineDash([]);
+        $('#pp-info', m).textContent = `${cols} × ${rows} = ${cols * rows} trang`;
+        $$('[data-o]', m).forEach(b => b.classList.toggle('on', (b.dataset.o === 'land') === land));
+      };
+      draw();
+      $$('[data-o]', m).forEach(b => b.onclick = () => { land = b.dataset.o === 'land'; draw(); });
+      $('#pp-cols', m).onchange = e => { cols = +e.target.value; draw(); };
+    },
+  });
+  if (!r) return;
+  const w = window.open('', '_blank');
+  if (!w) { toast('Trình duyệt đã chặn cửa sổ mới — hãy cho phép popup'); return; }
+  w.document.write('<!doctype html><meta charset="utf-8"><title>Đang chuẩn bị…</title><p style="font:16px sans-serif;padding:24px">Đang chuẩn bị các trang in…</p>');
+  // Ảnh lớn ~170 dpi mỗi trang (giới hạn bởi kích thước canvas tối đa của trình duyệt)
+  const scale = Math.min((r.cols * 1900) / W, 12000 / Math.max(W, H), Math.sqrt(120e6 / (W * H)));
+  const full = renderCanvas(S.map, { scale, pad: 30 });
+  const tpw = full.width / r.cols, tph = tpw * ratio(), rows = Math.max(1, Math.ceil(full.height / tph));
+  const offY = (rows * tph - full.height) / 2;
+  const pages = [];
+  for (let i = 0; i < rows; i++) for (let c = 0; c < r.cols; c++) {
+    const t = document.createElement('canvas');
+    t.width = Math.round(tpw); t.height = Math.round(tph);
+    const g = t.getContext('2d');
+    g.fillStyle = L.theme.bg; g.fillRect(0, 0, t.width, t.height);
+    g.drawImage(full, c * tpw, i * tph - offY, tpw, tph, 0, 0, t.width, t.height);
+    g.strokeStyle = 'rgba(120,120,120,.45)'; g.lineWidth = 2; g.strokeRect(1, 1, t.width - 2, t.height - 2);
+    pages.push({ url: t.toDataURL('image/png'), label: `${S.map.title} · Trang ${pages.length + 1}/${rows * r.cols} · hàng ${i + 1}, cột ${c + 1}` });
+  }
+  const [pw, ph] = r.land ? [281, 194] : [194, 281];
+  w.document.open();
+  w.document.write(`<!doctype html><html lang="vi"><meta charset="utf-8"><title>${esc(S.map.title)} — ${pages.length} trang A4</title>
+<style>
+  @page { size: A4 ${r.land ? 'landscape' : 'portrait'}; margin: 8mm; }
+  body { margin: 0; font: 9px sans-serif; color: #666; }
+  .pg { width: ${pw}mm; height: ${ph}mm; position: relative; break-after: page; overflow: hidden; }
+  .pg:last-child { break-after: auto; }
+  .pg img { width: 100%; height: 100%; display: block; }
+  .pg span { position: absolute; right: 3mm; bottom: 2mm; background: rgba(255,255,255,.8); padding: 0 4px; border-radius: 3px; }
+  @media screen { body { background: #ddd; padding: 12px; } .pg { background: #fff; margin: 0 auto 12px; box-shadow: 0 2px 8px rgba(0,0,0,.2); } }
+</style>
+${pages.map(p => `<div class="pg"><img src="${p.url}" alt="">${r.labels ? `<span>${esc(p.label)}</span>` : ''}</div>`).join('')}
+<script>window.onload = () => setTimeout(() => print(), 300);<\/script>`);
+  w.document.close();
+}
 async function printMap() {
   const w = window.open('', '_blank');
   if (!w) { toast('Trình duyệt đã chặn cửa sổ mới — hãy cho phép popup'); return; }
@@ -3516,6 +3598,7 @@ const ACTIONS = {
   'export-mm': () => download(safeName(S.map.title) + '.mm', toFreeMind(S.map.root), 'application/xml'),
   'export-json': () => exportWithFiles(S.map),
   print: printMap,
+  'print-poster': printPoster,
   'img-pick': () => { if (S.sel) imgInput.click(); },
   'img-remove': () => setProp('image', null),
   'img-size': el => { const n = getNode(S.sel); if (n?.image) commit(() => { n.image = { ...n.image, dw: +el.dataset.val }; }); },

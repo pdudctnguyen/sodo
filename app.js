@@ -1231,7 +1231,11 @@ function renderNodes(L, pf) {
         const off = hasTog ? 24 : 0;
         const [ax, ay] = typeof b.dir === 'string' ? [tx + off, ty] : [tx + off * b.dir, ty];
         inner += `<button class="tog add" data-act="tog-add" data-id="${b.id}" style="left:${ax}px;top:${ay}px" title="Thêm nút con (Tab)">+</button>`;
-        inner += `<span class="rsz${b.dir === -1 ? ' l' : ''}" data-rsz="${b.id}" title="Kéo để đổi kích thước · nhấp đúp để về cỡ tự động"></span>`;
+        // Ô kéo: góc đổi cả hai chiều, cạnh bên chỉ đổi bề ngang, cạnh dưới chỉ đổi chiều cao
+        const l = b.dir === -1 ? ' l' : '';
+        inner += `<span class="rsz${l}" data-rsz="${b.id}" data-ax="xy" title="Kéo để đổi kích thước · nhấp đúp để về cỡ tự động"></span>`
+          + `<span class="rsz rsz-x${l}" data-rsz="${b.id}" data-ax="x" title="Kéo để đổi bề ngang"></span>`
+          + `<span class="rsz rsz-y" data-rsz="${b.id}" data-ax="y" title="Kéo để đổi chiều cao"></span>`;
       }
     }
     out.push(`<div class="${cls.join(' ')}" data-id="${b.id}" style="${style}">${inner}</div>`);
@@ -1551,7 +1555,7 @@ canvas.addEventListener('pointerdown', e => {
   const rsz = e.target.closest('.rsz');
   if (rsz) {
     if (S.editing) commitEdit();
-    gesture = startResize(rsz.dataset.rsz, e, rsz.classList.contains('l'));
+    gesture = startResize(rsz.dataset.rsz, e, rsz.classList.contains('l'), rsz.dataset.ax);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
@@ -1595,13 +1599,13 @@ canvas.addEventListener('pointercancel', dropPointer);
 
 /** Bắt đầu kéo đổi cỡ. Thử làm nút to thêm 10px để biết mép nút dịch bao nhiêu
  *  (nút neo trái, neo phải hay nằm giữa tùy bố cục), nhờ đó ô kéo luôn bám theo con trỏ. */
-function startResize(id, e, left) {
+function startResize(id, e, left, axis = 'xy') {
   const n = getNode(id), b = S.L.boxes.get(id), orig = n.style ? { ...n.style } : null;
   const probe = (key, v) => { n.style = { ...(orig || {}), [key]: v }; const q = computeLayout(S.map).boxes.get(id); if (orig) n.style = orig; else delete n.style; return q; };
   const qw = probe('w', b.w + 10), qh = probe('h', b.h + 10);
   const k = v => (Math.abs(v) < 0.2 ? 1 : Math.abs(v));
   return {
-    type: 'resize', id, left, orig, w0: b.w, h0: b.h, p0: screenToWorld(e.clientX, e.clientY),
+    type: 'resize', id, left, axis, orig, w0: b.w, h0: b.h, p0: screenToWorld(e.clientX, e.clientY),
     kx: k(left ? (b.x - qw.x) / 10 : (qw.x + qw.w - b.x - b.w) / 10), ky: k((qh.y + qh.h - b.y - b.h) / 10),
   };
 }
@@ -1615,8 +1619,9 @@ function onMove(e) {
   if (g.type === 'resize') {
     const p = screenToWorld(e.clientX, e.clientY), n = getNode(g.id);
     const dx = (p.x - g.p0.x) * (g.left ? -1 : 1) / g.kx, dy = (p.y - g.p0.y) / g.ky;
-    const st = { ...(g.orig || {}), w: Math.round(Math.max(40, g.w0 + dx)) };
-    if (g.orig?.h || Math.abs(p.y - g.p0.y) > 4) st.h = Math.round(Math.max(20, g.h0 + dy));
+    const st = { ...(g.orig || {}) };
+    if (g.axis !== 'y') st.w = Math.round(Math.max(40, g.w0 + dx));
+    if (g.axis === 'y' || (g.axis === 'xy' && (g.orig?.h || Math.abs(p.y - g.p0.y) > 4))) st.h = Math.round(Math.max(20, g.h0 + dy));
     n.style = g.last = st;
     drawMap();
     return;
@@ -3562,7 +3567,7 @@ function showHelp() {
     ['<kbd>Ctrl</kbd>+<kbd>B</kbd> / <kbd>I</kbd>', 'Chữ đậm / nghiêng'], ['<kbd>Ctrl</kbd>+<kbd>F</kbd>', 'Tìm kiếm'],
     ['<kbd>Ctrl</kbd>+cuộn chuột, <kbd>Ctrl</kbd>+<kbd>=</kbd>/<kbd>−</kbd>', 'Phóng to / thu nhỏ'], ['<kbd>Ctrl</kbd>+<kbd>0</kbd>', 'Vừa màn hình'],
     ['Kéo khoảng trống / cuộn chuột', 'Di chuyển vùng vẽ'], ['Kéo một nút', 'Thả ra chỗ trống → đặt nút (cả nhánh) ở đó, đường nối tự đi theo; thả giữa nút khác → làm nút con; thả mép trên/dưới → chèn trước/sau. Nút “Về chỗ cũ” / “Sắp xếp lại” để trả về vị trí tự động'],
-    ['Kéo ô vuông ở góc nút đang chọn', 'Đổi kích thước nút (chữ tự xuống dòng theo bề rộng); nhấp đúp ô vuông để về cỡ tự động'],
+    ['Kéo ô ở góc / cạnh bên / cạnh dưới nút đang chọn', 'Đổi cả hai chiều / chỉ bề ngang / chỉ chiều cao (chữ tự xuống dòng theo bề rộng); nhấp đúp ô ở góc để về cỡ tự động'],
     ['<code>$x^2$</code>, <code>$\\frac{a}{b}$</code>', 'Công thức toán: gõ LaTeX giữa hai dấu $ (ví dụ $\\sqrt{x}$, $H_2O$, $\\Delta = b^2 - 4ac$)'],
     ['<kbd>Home</kbd>', 'Chọn chủ đề trung tâm'], ['<kbd>Esc</kbd>', 'Bỏ chọn / hủy'],
   ];

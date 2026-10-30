@@ -3493,7 +3493,7 @@ async function collectSetup() {
       <ol class="steps">
         <li>Mở <a href="https://sheets.new" target="_blank" rel="noopener">sheets.new</a> để tạo một Google Sheet mới (đặt tên ví dụ “Kết quả Sodo”).</li>
         <li>Trong Sheet chọn <b>Tiện ích mở rộng → Apps Script</b>. Xóa hết mã có sẵn, dán đoạn mã bên dưới, bấm <b>Lưu</b>.</li>
-        <li>Bấm <b>Triển khai → Tùy chọn triển khai mới</b> → loại <b>Ứng dụng web</b>. Thực thi với tư cách: <b>Tôi</b>; Người có quyền truy cập: <b>Bất kỳ ai</b>. Bấm <b>Triển khai</b> và cấp quyền khi Google hỏi.</li>
+        <li>Bấm <b>Triển khai → Tùy chọn triển khai mới</b> → loại <b>Ứng dụng web</b>. Thực thi với tư cách: <b>Tôi</b>; Người có quyền truy cập: <b>Bất kỳ ai</b>. Bấm <b>Triển khai</b> và cấp quyền khi Google hỏi. Nếu hiện “Google chưa xác minh ứng dụng này”, bấm <b>Nâng cao → Truy cập … (không an toàn)</b>: đây là đoạn mã của chính bạn nên an toàn.</li>
         <li>Sao chép <b>URL ứng dụng web</b> (dạng https://script.google.com/macros/s/…/exec) rồi dán vào ô dưới.</li>
       </ol>
       <div class="row" style="justify-content:space-between;margin:4px 0"><span class="muted" style="font-size:13px">Mã Apps Script</span><button type="button" class="btn small" id="cl-copy">${icon('copy')} Sao chép mã</button></div>

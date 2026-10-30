@@ -161,6 +161,7 @@ function cloneFresh(n) {
 function normalizeNode(n) {
   const out = { id: n.id || uid(), text: String(n.text ?? ''), children: (n.children || []).map(normalizeNode) };
   for (const k of ['icon', 'note', 'collapsed', 'side', 'style', 'image']) if (n[k] != null && n[k] !== '') out[k] = n[k];
+  if (Number.isFinite(n.offset?.x) && Number.isFinite(n.offset?.y)) out.offset = { x: n.offset.x, y: n.offset.y };
   const links = [...(n.link ? [{ url: n.link }] : []), ...(Array.isArray(n.links) ? n.links : [])].filter(l => l?.url);
   if (links.length) out.links = links.map(l => (l.title ? { url: String(l.url), title: String(l.title) } : { url: String(l.url) }));
   if (Array.isArray(n.files) && n.files.length) out.files = n.files.filter(f => f?.id).map(f => ({ id: f.id, name: String(f.name || 'tệp'), size: +f.size || 0, type: f.type || '' }));
@@ -404,7 +405,7 @@ const GUIDE = {
     Enter: thêm nút cùng cấp
     Delete: xóa nút
   Sắp xếp
-    Kéo thả nút để di chuyển
+    Kéo nút ra chỗ trống để đặt tự do
     Alt + ↑/↓ để đổi thứ tự
     Bấm vòng tròn bên cạnh nút để thu gọn
   Trang trí
@@ -658,6 +659,17 @@ function roughen(d, seed, amp, closed = false) {
   roughCache.set(key, res);
   return res;
 }
+/** Đường cong nối nút cha A với nút con B đã bị kéo đi: ngang hay dọc tùy B nằm bên cạnh hay phía trên/dưới. */
+function connector(A, B) {
+  const ca = A.x + A.w / 2, cb = B.x + B.w / 2, ma = A.y + A.h / 2, mb = B.y + B.h / 2;
+  const gapX = Math.abs(cb - ca) - (A.w + B.w) / 2, gapY = Math.abs(mb - ma) - (A.h + B.h) / 2;
+  if (gapX >= gapY) {
+    const px = cb > ca ? A.x + A.w : A.x, py = anchorY(A), qx = cb > ca ? B.x : B.x + B.w, qy = anchorY(B), mx = (px + qx) / 2;
+    return `M${px},${py} C${mx},${py} ${mx},${qy} ${qx},${qy}`;
+  }
+  const py = mb > ma ? A.y + A.h : A.y, qy = mb > ma ? B.y : B.y + B.h, my = (py + qy) / 2;
+  return `M${ca},${py} C${ca},${my} ${cb},${my} ${cb},${qy}`;
+}
 /** Dịch một path chỉ gồm lệnh tuyệt đối (M L H V C Q A Z) đi (dx, dy). */
 function shiftPath(d, dx, dy) {
   const f = v => +v.toFixed(2);
@@ -894,6 +906,19 @@ function computeLayout(map) {
     if (left.length) placeGroup(root, left, -1, 0);
   }
 
+  // Nút được kéo tự do: dời cả nhánh theo offset rồi nối lại đường tới nút cha
+  const moved = [...boxes.values()].filter(b => b.depth > 0 && b.node.offset);
+  if (moved.length) {
+    const orig = new Map([...boxes.values()].map(b => [b.id, [b.x, b.y]]));
+    const shiftSub = (b, dx, dy) => { b.x += dx; b.y += dy; b.kids.forEach(k => shiftSub(k, dx, dy)); };
+    for (const b of moved) shiftSub(b, b.node.offset.x, b.node.offset.y);
+    for (const e of edges) {
+      const A = boxes.get(e.from), B = boxes.get(e.to), [ax, ay] = orig.get(e.from), [bx, by] = orig.get(e.to);
+      const da = [A.x - ax, A.y - ay], db = [B.x - bx, B.y - by];
+      if (da[0] === db[0] && da[1] === db[1]) { if (da[0] || da[1]) e.d = shiftPath(e.d, da[0], da[1]); }
+      else e.d = connector(A, B);
+    }
+  }
   if (map.sketch) for (const e of edges) e.d = roughenAt(e.d, hashStr(e.from + e.to), 2.6);
 
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
@@ -1120,14 +1145,19 @@ function saveNow(withThumb = false) {
 /* =====================================================================
    VẼ LÊN MÀN HÌNH
    ===================================================================== */
-function render() {
-  if (!S.map) return;
+/** Vẽ lại riêng phần sơ đồ (không đụng bảng bên phải) — dùng khi kéo nút. */
+function drawMap() {
   const L = (S.L = computeLayout(S.map));
   const pf = S.presenting ? presentFocus() : null;
   edgesEl.innerHTML = L.edges.map(e => `<path d="${e.d}" stroke="${e.color}" stroke-width="${e.w}" fill="none" stroke-linecap="round"${pf && pf.has(e.to) && pf.has(e.from) ? ' class="pf"' : ''}/>`).join('');
   renderNodes(L, pf);
   renderRels(L);
   positionEditor(L);
+  return L;
+}
+function render() {
+  if (!S.map) return;
+  const L = drawMap();
   canvas.style.backgroundColor = L.theme.bg;
   canvas.style.backgroundImage = `radial-gradient(${L.theme.dot} 1.2px, transparent 1.3px)`;
   applyView();
@@ -1340,6 +1370,7 @@ function moveNode(id, targetId, pos, side) {
     }
     if (parent === S.map.root) node.side = side || (pos === 'child' ? pickSide() : target.side) || 'right';
     else delete node.side;
+    delete node.offset;
     S.sel = id;
   });
 }
@@ -1548,17 +1579,16 @@ function onMove(e) {
   } else if (g.type === 'node') {
     if (!g.started) {
       if (Math.hypot(e.clientX - g.sx, e.clientY - g.sy) < 6 || isRoot(g.id) || S.editing) return;
+      // Nút (cùng cả nhánh) đi theo con trỏ; đường nối và mối nối được vẽ lại liên tục
       g.started = true;
       g.skip = new Set(); walk(getNode(g.id), n => { g.skip.add(n.id); });
-      g.ghost = nodesEl.querySelector(`.node[data-id="${g.id}"]`).cloneNode(true);
-      Object.assign(g.ghost.style, { opacity: .85, pointerEvents: 'none', zIndex: 5, boxShadow: '0 8px 24px rgba(0,0,0,.18)' });
-      g.ghost.classList.remove('sel');
-      world.appendChild(g.ghost);
-      g.skip.forEach(id => nodesEl.querySelector(`.node[data-id="${id}"]`)?.classList.add('dragging'));
+      g.base = { ...(getNode(g.id).offset || { x: 0, y: 0 }) };
+      g.p0 = screenToWorld(g.sx, g.sy);
+      canvas.classList.add('moving');
     }
-    const p = screenToWorld(e.clientX, e.clientY);
-    const b = S.L.boxes.get(g.id);
-    g.ghost.style.left = p.x - b.w / 2 + 'px'; g.ghost.style.top = p.y - b.h / 2 + 'px';
+    const p = screenToWorld(e.clientX, e.clientY), n = getNode(g.id);
+    n.offset = g.last = { x: Math.round(g.base.x + p.x - g.p0.x), y: Math.round(g.base.y + p.y - g.p0.y) };
+    drawMap();
     g.drop = findDrop(p, g.skip);
     showDrop(g.drop);
   }
@@ -1574,9 +1604,12 @@ function onUp() {
     if (S.sel || S.selRel) { S.sel = null; S.selRel = null; S.panelTab = 'map'; render(); }
   } else if (g.type === 'pan') scheduleSave(false);
   if (g.type === 'node' && g.started) {
-    g.ghost.remove(); showDrop(null);
+    showDrop(null); canvas.classList.remove('moving');
+    const n = getNode(g.id);
+    // Trả lại vị trí cũ trước khi ghi lịch sử, để Hoàn tác đưa nút về đúng chỗ
+    if (g.base.x || g.base.y) n.offset = g.base; else delete n.offset;
     if (g.drop) moveNode(g.id, g.drop.id, g.drop.pos, g.drop.side);
-    else render();
+    else commit(() => { if (g.last.x || g.last.y) n.offset = g.last; else delete n.offset; });
   }
 }
 /** Anh em xếp theo hàng ngang (chèn trước/sau theo trục x) thay vì theo cột. */
@@ -1776,6 +1809,7 @@ function nodePanel() {
     <button class="btn" data-act="ai-expand" data-icon="sparkle">AI gợi ý</button>
     ${n.children.length && !isRoot(n.id) ? `<button class="btn" data-act="toggle-collapse" data-icon="fold">${n.collapsed ? 'Mở rộng' : 'Thu gọn'}</button>` : ''}
     <button class="btn" data-act="reset-style" data-icon="reset">Xóa định dạng</button>
+    ${n.offset ? '<button class="btn" data-act="reset-pos" data-icon="fit" title="Bỏ vị trí đã kéo, trả nút về chỗ tự động">Về chỗ cũ</button>' : ''}
     ${isRoot(n.id) ? '' : '<button class="btn del" data-act="delete-node" data-icon="trash">Xóa nút</button>'}
   </div></div>`;
 }
@@ -1787,6 +1821,7 @@ function relPanel() {
     <input id="pn-rel-label" class="field" placeholder="Nhãn (ví dụ: dẫn đến, ảnh hưởng…)" value="${esc(r.label || '')}"></div>
     <div class="pn-sec"><div class="acts-grid"><button class="btn" data-act="flip-rel" data-icon="reset">Đổi chiều</button><button class="btn del" data-act="del-rel" data-icon="trash">Xóa mối nối</button></div></div>`;
 }
+const hasOffsets = () => { let f = false; walk(S.map.root, n => { if (n.offset) f = true; }); return f; };
 function mapPanel() {
   let n = 0, depth = 0;
   walk(S.map.root, (x, p, d) => { n++; depth = Math.max(depth, d); });
@@ -1815,6 +1850,7 @@ function mapPanel() {
     <button class="btn" data-act="collapse-all">Thu gọn hết</button>
     <button class="btn" data-act="zoom-fit" data-icon="fit">Vừa màn hình</button>
     <button class="btn" data-act="add-child" data-icon="plus">Nhánh mới</button>
+    ${hasOffsets() ? '<button class="btn" data-act="reset-all-pos" data-icon="reset" title="Đưa mọi nút đã kéo tự do về vị trí tự động">Sắp xếp lại</button>' : ''}
   </div></div>`;
 }
 
@@ -3391,7 +3427,9 @@ const ACTIONS = {
   'font-dec': () => { const b = S.L.boxes.get(S.sel); if (b) setStyle('fontSize', Math.max(10, b.fs - 2)); },
   bold: () => { const b = S.L.boxes.get(S.sel); if (b) setStyle('bold', !(+/(\d+)/.exec(b.font)[1] >= 600)); },
   italic: () => { const n = getNode(S.sel); if (n) setStyle('italic', n.style?.italic ? '' : true); },
-  layout: el => { commit(() => { S.map.layout = el.dataset.val; if (el.dataset.val === 'map') assignSides(S.map.root); }); fitAll(); },
+  layout: el => { commit(() => { S.map.layout = el.dataset.val; walk(S.map.root, n => { delete n.offset; }); if (el.dataset.val === 'map') assignSides(S.map.root); }); fitAll(); },
+  'reset-pos': () => { const n = getNode(S.sel); if (n?.offset) commit(() => { delete n.offset; }); },
+  'reset-all-pos': () => commit(() => { walk(S.map.root, n => { delete n.offset; }); }),
   theme: el => commit(() => { S.map.theme = el.dataset.val; }),
   sketch: el => { commit(() => { if (el.dataset.val) S.map.sketch = true; else delete S.map.sketch; }); fitAll(); },
   'ui-mode': el => { UI.set(el.dataset.val); if (S.map) render(); },
@@ -3457,7 +3495,7 @@ function showHelp() {
     ['<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>', 'Hoàn tác / làm lại'],
     ['<kbd>Ctrl</kbd>+<kbd>B</kbd> / <kbd>I</kbd>', 'Chữ đậm / nghiêng'], ['<kbd>Ctrl</kbd>+<kbd>F</kbd>', 'Tìm kiếm'],
     ['<kbd>Ctrl</kbd>+cuộn chuột, <kbd>Ctrl</kbd>+<kbd>=</kbd>/<kbd>−</kbd>', 'Phóng to / thu nhỏ'], ['<kbd>Ctrl</kbd>+<kbd>0</kbd>', 'Vừa màn hình'],
-    ['Kéo khoảng trống / cuộn chuột', 'Di chuyển vùng vẽ'], ['Kéo một nút', 'Đổi vị trí: thả giữa nút → làm nút con; thả mép trên/dưới → chèn trước/sau'],
+    ['Kéo khoảng trống / cuộn chuột', 'Di chuyển vùng vẽ'], ['Kéo một nút', 'Thả ra chỗ trống → đặt nút (cả nhánh) ở đó, đường nối tự đi theo; thả giữa nút khác → làm nút con; thả mép trên/dưới → chèn trước/sau. Nút “Về chỗ cũ” / “Sắp xếp lại” để trả về vị trí tự động'],
     ['<code>$x^2$</code>, <code>$\\frac{a}{b}$</code>', 'Công thức toán: gõ LaTeX giữa hai dấu $ (ví dụ $\\sqrt{x}$, $H_2O$, $\\Delta = b^2 - 4ac$)'],
     ['<kbd>Home</kbd>', 'Chọn chủ đề trung tâm'], ['<kbd>Esc</kbd>', 'Bỏ chọn / hủy'],
   ];

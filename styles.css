@@ -473,3 +473,4 @@ kbd {
 .node.s-path { isolation: isolate; }
 .node .nshape { position: absolute; left: 0; top: 0; z-index: -1; overflow: visible; pointer-events: none; }
 .btn.icon-only { padding-left: 9px; padding-right: 9px; }
+.canvas.moving { cursor: grabbing; }

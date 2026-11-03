@@ -227,6 +227,8 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; width: 100%
   .presenting #world.anim { transition-duration: .01s; }
 }
 .present-bar button.on { background: rgba(255,255,255,.22); }
+.present-bar select { height: 30px; border: none; border-radius: 15px; padding: 0 6px; background: rgba(255,255,255,.12); color: #fff; font: 13px var(--font); cursor: pointer; }
+.present-bar select option { color: #1f2333; }
 .present-bar {
   position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 10;
   display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 30px;

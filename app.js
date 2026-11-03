@@ -2207,13 +2207,14 @@ $('#search-input').addEventListener('keydown', e => {
    ===================================================================== */
 // spot: làm nổi nhánh đang nói, phần còn lại mờ đi · build: sơ đồ hiện dần từng ý theo thứ tự
 const PRESENT_FX = { spot: 'Làm nổi nhánh đang nói', build: 'Hiện dần từng ý' };
+const PRESENT_SEC = [3, 5, 8, 12, 20, 30];
 const presentCfg = () => { try { return JSON.parse(localStorage.getItem('sodo.present') || '{}'); } catch { return {}; } };
 function startPresent() {
   if (S.editing) commitEdit();
   const order = [];
   walk(S.map.root, n => { order.push(n.id); return !n.collapsed; });
   const fx = PRESENT_FX[presentCfg().fx] ? presentCfg().fx : 'spot';
-  S.presenting = { order, i: Math.max(0, order.indexOf(S.sel)), fx, lit: new Set(), fresh: new Map(), left: new Set(), timer: null };
+  S.presenting = { order, i: Math.max(0, order.indexOf(S.sel)), fx, sec: PRESENT_SEC.includes(presentCfg().sec) ? presentCfg().sec : 5, lit: new Set(), fresh: new Map(), left: new Set(), timer: null };
   $('#editor').classList.add('presenting');
   $('#present-bar').hidden = false;
   presentBar();
@@ -2228,7 +2229,8 @@ function presentBar() {
   $('#editor').classList.toggle('fx-build', P.fx === 'build');
   const play = $('[data-act="present-play"]');
   play.textContent = P.timer ? '❚❚' : '▶';
-  play.title = P.timer ? 'Dừng tự chạy' : 'Tự chạy (5 giây mỗi ý)';
+  play.title = P.timer ? 'Dừng tự chạy' : `Tự chạy (${P.sec} giây mỗi ý)`;
+  $('#present-sec').value = P.sec;
 }
 function presentFx() {
   const P = S.presenting; if (!P) return;
@@ -2243,10 +2245,18 @@ function presentPlay(on = !S.presenting?.timer) {
   clearInterval(P.timer); P.timer = null;
   if (on) {
     if (P.i >= P.order.length - 1) { P.i = 0; P.lit = new Set(); showSlide(); }
-    P.timer = setInterval(() => { if (P.i >= P.order.length - 1) presentPlay(false); else stepSlide(1, true); }, 5000);
+    P.timer = setInterval(() => { if (P.i >= P.order.length - 1) presentPlay(false); else stepSlide(1, true); }, P.sec * 1000);
   }
   presentBar();
 }
+$('#present-sec').innerHTML = PRESENT_SEC.map(n => `<option value="${n}">${n} giây</option>`).join('');
+$('#present-sec').onchange = e => {
+  const P = S.presenting; if (!P) return;
+  P.sec = +e.target.value;
+  try { localStorage.setItem('sodo.present', JSON.stringify({ ...presentCfg(), sec: P.sec })); } catch {}
+  if (P.timer) presentPlay(true); else presentBar();
+  e.target.blur();   // để phím → / Space vẫn chuyển ý
+};
 /** Tính nút nào sáng, nút nào ẩn (khi hiện dần), nút nào vừa xuất hiện để chạy hiệu ứng. */
 function presentCalc() {
   const P = S.presenting;
@@ -2289,7 +2299,7 @@ function showSlide() {
 }
 function stepSlide(d, auto) {
   const P = S.presenting; if (!P) return;
-  if (!auto && P.timer) presentPlay(true);   // bấm tay thì đếm lại 5 giây
+  if (!auto && P.timer) presentPlay(true);   // bấm tay thì đếm lại từ đầu
   P.i = clamp(P.i + d, 0, P.order.length - 1); showSlide();
 }
 document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && S.presenting) stopPresent(); });

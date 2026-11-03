@@ -361,6 +361,12 @@ kbd {
   animation: rise .2s;
 }
 @keyframes fade { from { opacity: 0; } }
+.update-bar {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60; max-width: calc(100vw - 32px);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  padding: 10px 12px 10px 16px; border-radius: 12px; background: var(--float, #fff); color: var(--ink);
+  box-shadow: var(--shadow-lg); font-size: 14px; animation: rise .25s;
+}
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 
 /* ---------- Màn hình nhỏ ---------- */

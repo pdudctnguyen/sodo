@@ -4265,7 +4265,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && S.m
 /* ---------------- Cài như ứng dụng (PWA) & dùng khi mất mạng ---------------- */
 let installPrompt = null;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(err => console.warn('Không đăng ký được service worker', err));
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(err => console.warn('Không đăng ký được service worker', err));
 }
 // Nút "Cài ứng dụng" luôn hiện (Safari/iPhone không có lời mời cài tự động), trừ khi đang mở bằng app đã cài
 const runningAsApp = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -4288,6 +4288,41 @@ async function installApp() {
   installPrompt = null;
   if (outcome === 'accepted') $('[data-act="install-app"]').hidden = true;
 }
+/* ---------------- Báo khi có bản Sodo mới (cho cả app đã cài, vốn ít khi được tải lại) ---------------- */
+const Update = {
+  files: ['./', './app.js', './styles.css'],
+  base: null,
+  // Dấu phiên bản của từng tệp trên máy chủ; null nếu mất mạng
+  tags() {
+    return Promise.all(this.files.map(f => fetch(f, { method: 'HEAD', cache: 'no-store' })
+      .then(r => (r.ok ? r.headers.get('etag') || r.headers.get('last-modified') || '' : ''), () => null)));
+  },
+  async check() {
+    if (S.presenting || S.quiz || $('#update-bar')) return;   // không chen ngang lúc đang trình chiếu / ôn tập
+    const t = await this.tags();
+    if (t.includes(null)) return;
+    if (!this.base) { this.base = t; return; }
+    if (t.some((x, i) => x && this.base[i] && x !== this.base[i])) this.show();
+  },
+  show() {
+    const el = document.createElement('div');
+    el.id = 'update-bar'; el.className = 'update-bar';
+    el.innerHTML = `<span>✨ Đã có phiên bản Sodo mới.</span>
+      <button class="btn small primary" data-u="go">Cập nhật ngay</button><button class="btn small" data-u="later" title="Để sau">Để sau</button>`;
+    el.onclick = e => {
+      const u = e.target.closest('[data-u]')?.dataset.u; if (!u) return;
+      if (u === 'later') { el.remove(); this.base = null; this.check(); return; }   // nhắc lại ở bản sau
+      if (S.editing) commitEdit();
+      if (S.map) saveNow(true);
+      location.reload();
+    };
+    document.body.appendChild(el);
+  },
+};
+Update.check();
+setInterval(() => Update.check(), 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) Update.check(); });
+window.addEventListener('online', () => Update.check());
 window.addEventListener('offline', () => toast('Mất kết nối mạng — vẫn vẽ sơ đồ bình thường, riêng AI và chia sẻ cần mạng.', 4000));
 
 /* ---------------- Giao diện sáng / tối của ứng dụng (sơ đồ giữ chủ đề màu riêng) ---------------- */

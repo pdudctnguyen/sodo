@@ -2213,7 +2213,7 @@ function startPresent() {
   if (S.editing) commitEdit();
   const order = [];
   walk(S.map.root, n => { order.push(n.id); return !n.collapsed; });
-  const fx = PRESENT_FX[presentCfg().fx] ? presentCfg().fx : 'spot';
+  const fx = PRESENT_FX[presentCfg().fx] ? presentCfg().fx : 'build';
   S.presenting = { order, i: Math.max(0, order.indexOf(S.sel)), fx, sec: PRESENT_SEC.includes(presentCfg().sec) ? presentCfg().sec : 5, lit: new Set(), fresh: new Map(), left: new Set(), timer: null };
   $('#editor').classList.add('presenting');
   $('#present-bar').hidden = false;
@@ -4267,6 +4267,9 @@ let installPrompt = null;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(err => console.warn('Không đăng ký được service worker', err));
 }
+// Nút "Cài ứng dụng" luôn hiện (Safari/iPhone không có lời mời cài tự động), trừ khi đang mở bằng app đã cài
+const runningAsApp = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+$('[data-act="install-app"]').hidden = runningAsApp();
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault(); installPrompt = e;
   $('[data-act="install-app"]').hidden = false;
@@ -4276,12 +4279,14 @@ async function installApp() {
   if (!installPrompt) {
     modal({ title: 'Cài Sodo như ứng dụng', body: `<p><b>iPhone / iPad (Safari):</b> bấm nút Chia sẻ <span style="font-size:16px">⎋</span> → “Thêm vào MH chính”.</p>
       <p><b>Android (Chrome):</b> bấm ⋮ → “Cài đặt ứng dụng” hoặc “Thêm vào màn hình chính”.</p>
-      <p><b>Máy tính (Chrome / Edge):</b> bấm biểu tượng cài đặt ở cuối thanh địa chỉ.</p>` });
+      <p><b>Máy tính (Chrome / Edge):</b> bấm biểu tượng cài đặt <span style="font-size:16px">⊕</span> ở cuối thanh địa chỉ, hoặc ⋮ → “Truyền, lưu và chia sẻ” → “Cài đặt trang dưới dạng ứng dụng”.</p>
+      <p class="muted">Sau khi cài, Sodo có biểu tượng riêng trên màn hình/Dock, mở trong cửa sổ riêng, dùng được khi mất mạng và tự cập nhật bản mới.</p>` });
     return;
   }
   installPrompt.prompt();
-  await installPrompt.userChoice;
-  installPrompt = null; $('[data-act="install-app"]').hidden = true;
+  const { outcome } = await installPrompt.userChoice;
+  installPrompt = null;
+  if (outcome === 'accepted') $('[data-act="install-app"]').hidden = true;
 }
 window.addEventListener('offline', () => toast('Mất kết nối mạng — vẫn vẽ sơ đồ bình thường, riêng AI và chia sẻ cần mạng.', 4000));
 

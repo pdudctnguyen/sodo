@@ -1318,8 +1318,20 @@ function saveNow(withThumb = false) {
 /** Vẽ lại riêng phần sơ đồ (không đụng bảng bên phải) — dùng khi kéo nút. */
 function drawMap() {
   const L = (S.L = computeLayout(S.map));
-  const pf = S.presenting ? presentFocus() : null;
-  edgesEl.innerHTML = L.edges.map(e => `<path d="${e.d}" stroke="${e.color}" stroke-width="${e.w}" fill="none" stroke-linecap="round"${pf && pf.has(e.to) && pf.has(e.from) ? ' class="pf"' : ''}/>`).join('');
+  const P = S.presenting, pf = P ? P.lit : null;
+  edgesEl.innerHTML = L.edges.map(e => {
+    let a = '';
+    if (P) {
+      const c = [];
+      if (pf.has(e.to) && pf.has(e.from)) c.push('pf');
+      if (P.shown && !(P.shown.has(e.to) && P.shown.has(e.from))) c.push('gone');
+      // Đường nối tới ý mới được "vẽ" ra ngay trước khi ý đó bật lên
+      if (P.fresh.has(e.to) && e.to !== e.from) { c.push('enter'); a = ` pathLength="1" style="--d:${Math.max(0, P.fresh.get(e.to) - 140)}ms"`; }
+      else if (P.left.has(e.to)) c.push('leave');
+      if (c.length) a += ` class="${c.join(' ')}"`;
+    }
+    return `<path d="${e.d}" stroke="${e.color}" stroke-width="${e.w}" fill="none" stroke-linecap="round"${a}/>`;
+  }).join('');
   renderNodes(L, pf);
   renderRels(L);
   positionEditor(L);
@@ -1359,10 +1371,14 @@ function renderNodes(L, pf) {
     if (b.id === S.editing) cls.push('editing');
     if (S.matches?.has(b.id)) cls.push('match');
     if (pf?.has(b.id)) cls.push('pf');
+    const P = S.presenting;
+    if (P?.shown && !P.shown.has(b.id)) cls.push('gone');
+    if (P?.fresh.has(b.id)) cls.push('enter');
+    else if (P?.left.has(b.id)) cls.push('leave');
     if (S.quiz && !S.quiz.shown.has(b.id)) cls.push('hid');
     const shadow = drawn ? 'none' : b.shape === 'underline' ? `inset 0 -${b.ul}px 0 ${b.color}` : b.stroke ? `inset 0 0 0 2px ${b.stroke}` : 'none';
     const style = `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;padding:${b.padT}px ${b.padX}px ${b.padB}px ${b.padL}px;` +
-      `background:${drawn ? 'transparent' : b.fill};color:${b.text};font:${b.font};line-height:${b.lh}px;border-radius:${drawn ? 0 : radiusOf(b)}px;box-shadow:${shadow};--c:${b.color}`;
+      `background:${drawn ? 'transparent' : b.fill};color:${b.text};font:${b.font};line-height:${b.lh}px;border-radius:${drawn ? 0 : radiusOf(b)}px;box-shadow:${shadow};--c:${b.color}` + (P?.fresh.has(b.id) ? `;--d:${P.fresh.get(b.id)}ms` : '');
     let inner = drawn ? `<svg class="nshape" width="${b.w}" height="${b.h}">${nodeShapeSVG(b)}</svg>` : '';
     if (n.image) inner += `<img class="nimg" src="${n.image.src}" alt="" draggable="false" style="left:${b.imgX}px;top:${b.imgY}px;width:${b.imgW}px;height:${b.imgH}px">`;
     if (n.icon) inner += `<span class="ic" style="width:${b.iconW}px;font-size:${b.fs}px">${esc(n.icon)}</span>`;
@@ -1424,7 +1440,7 @@ function animateView(fn) {
   world.classList.add('anim');
   fn(); applyView();
   clearTimeout(animateView.t);
-  animateView.t = setTimeout(() => world.classList.remove('anim'), 420);
+  animateView.t = setTimeout(() => world.classList.remove('anim'), S.presenting ? 800 : 420);
 }
 function zoomAt(k, sx, sy) {
   const r = canvas.getBoundingClientRect();
@@ -2189,20 +2205,64 @@ $('#search-input').addEventListener('keydown', e => {
 /* =====================================================================
    TRÌNH CHIẾU — đi lần lượt qua từng nút, phóng vào nhánh đang nói
    ===================================================================== */
+// spot: làm nổi nhánh đang nói, phần còn lại mờ đi · build: sơ đồ hiện dần từng ý theo thứ tự
+const PRESENT_FX = { spot: 'Làm nổi nhánh đang nói', build: 'Hiện dần từng ý' };
+const presentCfg = () => { try { return JSON.parse(localStorage.getItem('sodo.present') || '{}'); } catch { return {}; } };
 function startPresent() {
   if (S.editing) commitEdit();
   const order = [];
   walk(S.map.root, n => { order.push(n.id); return !n.collapsed; });
-  S.presenting = { order, i: Math.max(0, order.indexOf(S.sel)) };
+  const fx = PRESENT_FX[presentCfg().fx] ? presentCfg().fx : 'spot';
+  S.presenting = { order, i: Math.max(0, order.indexOf(S.sel)), fx, lit: new Set(), fresh: new Map(), left: new Set(), timer: null };
   $('#editor').classList.add('presenting');
   $('#present-bar').hidden = false;
+  presentBar();
   document.documentElement.requestFullscreen?.().catch(() => {});
   setTimeout(showSlide, 120);
 }
+function presentBar() {
+  const P = S.presenting; if (!P) return;
+  const fx = $('[data-act="present-fx"]');
+  fx.title = `Hiệu ứng: ${PRESENT_FX[P.fx]} — bấm để đổi`;
+  fx.classList.toggle('on', P.fx === 'build');
+  $('#editor').classList.toggle('fx-build', P.fx === 'build');
+  const play = $('[data-act="present-play"]');
+  play.textContent = P.timer ? '❚❚' : '▶';
+  play.title = P.timer ? 'Dừng tự chạy' : 'Tự chạy (5 giây mỗi ý)';
+}
+function presentFx() {
+  const P = S.presenting; if (!P) return;
+  P.fx = P.fx === 'spot' ? 'build' : 'spot';
+  try { localStorage.setItem('sodo.present', JSON.stringify({ ...presentCfg(), fx: P.fx })); } catch {}
+  P.lit = new Set();   // chạy lại hiệu ứng xuất hiện cho trang hiện tại
+  toast(PRESENT_FX[P.fx]);
+  presentBar(); showSlide();
+}
+function presentPlay(on = !S.presenting?.timer) {
+  const P = S.presenting; if (!P) return;
+  clearInterval(P.timer); P.timer = null;
+  if (on) {
+    if (P.i >= P.order.length - 1) { P.i = 0; P.lit = new Set(); showSlide(); }
+    P.timer = setInterval(() => { if (P.i >= P.order.length - 1) presentPlay(false); else stepSlide(1, true); }, 5000);
+  }
+  presentBar();
+}
+/** Tính nút nào sáng, nút nào ẩn (khi hiện dần), nút nào vừa xuất hiện để chạy hiệu ứng. */
+function presentCalc() {
+  const P = S.presenting;
+  const shown = P.fx === 'build' ? new Set(P.order.slice(0, P.i + 1)) : null;
+  const lit = presentFocus();
+  if (shown) for (const id of lit) if (!shown.has(id)) lit.delete(id);
+  const rank = new Map(P.order.map((id, i) => [id, i]));
+  P.fresh = new Map([...lit].filter(id => !P.lit.has(id)).sort((a, b) => rank.get(a) - rank.get(b)).map((id, i) => [id, 160 + i * 110]));
+  P.left = new Set([...P.lit].filter(id => !lit.has(id)));
+  P.lit = lit; P.shown = shown;
+}
 function stopPresent() {
   if (!S.presenting) return;
+  clearInterval(S.presenting.timer);
   S.presenting = null;
-  $('#editor').classList.remove('presenting');
+  $('#editor').classList.remove('presenting', 'fx-build');
   $('#present-bar').hidden = true;
   if (document.fullscreenElement) document.exitFullscreen?.();
   render(); setTimeout(() => fitAll(), 120);
@@ -2216,16 +2276,20 @@ function presentFocus() {
 function showSlide() {
   const P = S.presenting; if (!P) return;
   S.sel = P.order[P.i];
+  presentCalc();
   render();
-  const b = S.L.boxes.get(S.sel);
-  const group = [b, ...b.kids];
+  P.fresh = new Map(); P.left = new Set();   // hiệu ứng chỉ chạy một lần, không lặp lại khi vẽ lại
+  const b = S.L.boxes.get(S.sel), par = parentOf(S.sel);
+  // Hiện dần: giữ nút cha trong khung để thấy ý mới mọc ra từ đâu
+  const group = [b, ...b.kids, ...(P.fx === 'build' && par ? [S.L.boxes.get(par.id)] : [])];
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
   for (const g of group) { x1 = Math.min(x1, g.x); y1 = Math.min(y1, g.y); x2 = Math.max(x2, g.x + g.w); y2 = Math.max(y2, g.y + g.h); }
   fitTo({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }, { max: 2.2, pad: 90 });
   $('#present-count').textContent = `${P.i + 1} / ${P.order.length}`;
 }
-function stepSlide(d) {
+function stepSlide(d, auto) {
   const P = S.presenting; if (!P) return;
+  if (!auto && P.timer) presentPlay(true);   // bấm tay thì đếm lại 5 giây
   P.i = clamp(P.i + d, 0, P.order.length - 1); showSlide();
 }
 document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && S.presenting) stopPresent(); });
@@ -3945,7 +4009,7 @@ const ACTIONS = {
   'panel-tab': el => { S.panelTab = el.dataset.val; renderPanel(); },
   search: openSearch,
   'search-next': () => searchStep(1), 'search-prev': () => searchStep(-1), 'search-close': closeSearch,
-  present: startPresent, 'present-next': () => stepSlide(1), 'present-prev': () => stepSlide(-1), 'present-exit': stopPresent,
+  present: startPresent, 'present-next': () => stepSlide(1), 'present-prev': () => stepSlide(-1), 'present-exit': stopPresent, 'present-fx': presentFx, 'present-play': () => presentPlay(),
   'zoom-in': () => zoomAt(S.view.k * 1.2), 'zoom-out': () => zoomAt(S.view.k / 1.2),
   'zoom-fit': () => fitAll(),
   'zoom-reset': () => { animateView(() => { S.view.k = 1; }); centerOn(S.sel || S.map.root.id); },
